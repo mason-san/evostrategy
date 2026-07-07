@@ -4,7 +4,6 @@ from pathlib import Path
 from PIL import Image 
 import pytesseract 
 
-
 def extract_text(image_path: Path) -> str:
     """Extract text from image using Tesseract OCR.
 
@@ -24,7 +23,7 @@ def extract_text(image_path: Path) -> str:
 if __name__ == "__main__":
     
     image_path = Path(
-        "data/processed/images/invoice_001_page_1.png"
+        "data/processed/images/invoice_002_page_1.png"
     )
     
     text = extract_text(image_path)

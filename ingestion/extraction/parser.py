@@ -1,5 +1,7 @@
 """Parse the output of ocr into something that is very useful."""
 
+from ingestion.schemas.invoice_schema import Invoice
+
 def parse_invoice(text: str) -> dict:
     """Convert OCR into structured invoice data
 
@@ -61,5 +63,8 @@ Authorized Signatory
 ABC Technologies Pvt Ltd
     """
     
-    out = parse_invoice(test)
-    print(out)
+    invoice_data = parse_invoice(test)
+
+    invoice = Invoice(**invoice_data)
+
+    print(invoice)
