@@ -8,14 +8,20 @@ def parse_invoice(text: str) -> dict:
 
     Args:
         text (str): Give the OCR output text to this function to parse as json files
+
+    Returns:
+        dict: A dictionary containing the parsed invoice data.
     """
-    
+    #Get each line from the text and split it into a list of lines.
     lines = text.splitlines()
+    #Create an empty dictionary to store the invoice data.
     invoice_data = {}
     
     for line in lines:
-        line = line.strip() 
-        
+        # OCR often introduces leading/trailing whitespace,
+        # so normalize each line before matching.
+        line = line.strip()
+        #Checking if the line starts with the keywords. 
         if line.startswith("Invoice Number"):
             invoice_data["invoice_number"] =  line.split(":")[-1].strip()
         
@@ -32,42 +38,3 @@ def parse_invoice(text: str) -> dict:
             
     return invoice_data
     
-if __name__ == "__main__":
-    test = """ABC Technologies Pvt Ltd
-
-INVOICE
-
-Invoice Number: INV-2026-001
-Invoice Date: 01-07-2026
-
-Bill To:
-CloudNova Solutions Pvt Ltd
-Mangalore, Karnataka
-
-Description:
-Custom Software Development Services
-
-Quantity: 1
-
-Rate: £25,000
-Subtotal: %25,000
-GST (18%): %4,500
-Total Amount: £29,500
-
-Payment Terms:
-Net 30 Days
-
-Bank Reference:
-ABC-REF-001
-
-Authorized Signatory
-ABC Technologies Pvt Ltd
-    """
-    
-    invoice_data = parse_invoice(test)
-
-    invoice = Invoice(**invoice_data)
-
-    print(invoice)
-
-    print(save_invoice(invoice))

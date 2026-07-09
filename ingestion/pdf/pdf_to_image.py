@@ -3,27 +3,34 @@
 import fitz
 from pathlib import Path
 
-PDF_PATH = "data/raw/invoices/invoice_002.pdf"
+def pdf_to_images(pdf_path: Path) -> list[Path]:
+    """
+    Convert a PDF file into images, one image per page.
 
-doc = fitz.open(PDF_PATH)
+    Args:
+        pdf_path (Path): The path to the PDF file.
+    
+    Returns:
+        list[Path]: A list of paths to the generated image files.
+    """
 
-print(f"Pages found: {len(doc)}")
+    #Error checking if the file exists or not.
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"The file {pdf_path} does not exist.")
 
-output_dir = Path("data/processed/images")
-output_dir.mkdir(parents=True, exist_ok=True)
+    doc = fitz.open(pdf_path) # Open the PDF file as a document (Python object)
+    output_dir = Path("data/processed/images") #Define the output directory where the images of the pdf's will be saved. 
+    output_dir.mkdir(parents=True, exist_ok=True) #Made the directory
 
-for page_num in range(len(doc)):
+    image_paths = [] #List of multiple images from different pages of the pdf.
+
+    for page_num in range(len(doc)):
+        page = doc[page_num] #Each page
+        pix = page.get_pixmap(matrix=fitz.Matrix(3, 3)) #Convert the page into an image with a scaling factor of 3 for better resolution 
+        output_file = output_dir / f"{Path(pdf_path).stem}_page_{page_num + 1}.png" #Define the output file path
+        pix.save(output_file) #Just writing to disk. 
+        image_paths.append(output_file) #Images are added to the image list.
+        print(f"Saved: {output_file}")
     
-    page = doc[page_num]
-    
-    pix = page.get_pixmap(
-        matrix=fitz.Matrix(3, 3)
-    )
-    
-    output_file = output_dir / f"invoice_002_page_{page_num + 1}.png"
-    
-    pix.save(output_file)
-    
-    print(f"Saved: {output_file}")
-    
-print("PDF conversion complete")
+    print("PDF conversion complete")
+    return image_paths
