@@ -63,3 +63,4 @@ ABC Technologies Pvt Ltd
     
     out = parse_invoice(test)
     print(out)
+    print("successfully parsed invoice data")
