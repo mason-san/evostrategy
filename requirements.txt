@@ -1,3 +1,4 @@
+# System-level dependency: tesseract OCR binary (install with Homebrew or apt)
 asarPy==1.0.1
 numpy==2.5.0
 opencv-python==4.13.0.92
@@ -5,3 +6,4 @@ packaging==26.2
 pillow==12.2.0
 PyMuPDF==1.27.2.3
 pytesseract==0.3.13
+pydantic==2.13.4
