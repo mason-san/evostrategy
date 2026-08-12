@@ -18,7 +18,7 @@ import streamlit as st
 # role is one of: "reviewer", "admin"
 USERS = {
     "ayushi": {
-        "password_hash": bcrypt.hashpw(b"changeme123", bcrypt.gensalt()).decode(),
+        "password_hash": "$2b$12$CQtobTleq9JCm9kl9IqkHOeixz/WBySNu0.tb/9yObk4rxjDU3Sl.",
         "role": "admin",
     },
     "reviewer1": {
