@@ -19,7 +19,7 @@ def pdf_to_images(pdf_path: Path) -> list[Path]:
         raise FileNotFoundError(f"The file {pdf_path} does not exist.")
 
     doc = fitz.open(pdf_path) # Open the PDF file as a document (Python object)
-    output_dir = Path("data/processed/images") #Define the output directory where the images of the pdf's will be saved. 
+    output_dir = Path(__file__).resolve().parent.parent.parent / "data" / "processed" / "images"
     output_dir.mkdir(parents=True, exist_ok=True) #Made the directory
 
     image_paths = [] #List of multiple images from different pages of the pdf.

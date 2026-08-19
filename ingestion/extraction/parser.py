@@ -30,11 +30,8 @@ def parse_invoice(text: str) -> dict:
             
         elif line.startswith("Total Amount"):
             amount = line.split(":")[-1].strip()
-            amount = amount.replace("£","")
-            amount = amount.replace("%", "")
-            amount = amount.replace("INR", "")
-            amount = amount.replace(",", "")
-            invoice_data["total_amount"] = int(amount)
+            amount = amount.replace("£","").replace("$","").replace("€","").replace("₹","")
+            amount = amount.replace("%", "").replace("INR", "").replace(",", "")
+            invoice_data["total_amount"] = float(amount)
             
     return invoice_data
-    

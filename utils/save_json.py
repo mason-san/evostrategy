@@ -18,7 +18,7 @@ def save_invoice(invoice: Invoice) -> str:
 
     filename = f"{invoice.invoice_number}.json"
 
-    output_dir = Path("data/processed/extracted")
+    output_dir = Path(__file__).resolve().parent.parent / "data" / "processed" / "extracted"
 
     output_dir.mkdir(
         parents=True,
