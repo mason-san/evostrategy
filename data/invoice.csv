@@ -1,0 +1,6 @@
+invoice_id,vendor,amount,status
+INV001,ABC Supplies,12500,Pending
+INV002,XYZ Traders,8400,Pending
+INV003,Global Parts,15750,Pending
+INV004,ABC Supplies,9200,Pending
+INV005,Tech Solutions,11300,Pending
