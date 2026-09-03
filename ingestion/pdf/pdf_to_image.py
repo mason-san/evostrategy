@@ -32,5 +32,5 @@ def pdf_to_images(pdf_path: Path) -> list[Path]:
         image_paths.append(output_file) #Images are added to the image list.
         print(f"Saved: {output_file}")
     
-    print("PDF conversion complete")
+    print("(pdf_to_image MODULE) : PDF conversion complete")
     return image_paths

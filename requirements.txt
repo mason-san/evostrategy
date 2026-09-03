@@ -1,5 +1,7 @@
+google-genai>=1.0.0
 packaging==2.6.2
 pillow==12.2.0
 pydantic>=2.0.0
+python-dotenv>=1.0.0
 PyMuPDF==1.27.2.3
 pytesseract==0.3.13
