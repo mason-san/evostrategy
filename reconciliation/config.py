@@ -15,6 +15,6 @@ TOLERANCE_OVERRIDES = {
     # "gst": 0.5,
 }
 
-
 def get_tolerance(field: str) -> float:
+    #return the field tolerence value if it exists, otherwise just return that 2%
     return TOLERANCE_OVERRIDES.get(field, DEFAULT_TOLERANCE_PERCENT)

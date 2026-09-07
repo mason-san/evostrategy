@@ -7,7 +7,7 @@ Kept separate from comparator.py so these rules are easy to unit test
 and easy to change later without touching how values get compared.
 """
 
-from .models import ReconciliationStatus
+from .model import ReconciliationStatus
 
 
 def determine_status(difference_percent: float, tolerance: float) -> ReconciliationStatus:

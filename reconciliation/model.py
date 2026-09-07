@@ -10,7 +10,7 @@ from dataclasses import dataclass, field as dc_field
 from enum import Enum
 from typing import Optional, Union
 
-
+#The four possible outcomes for a given set of documents
 class ReconciliationStatus(str, Enum):
     MATCHED = "MATCHED"
     AUTO_RESOLVED = "AUTO_RESOLVED"
