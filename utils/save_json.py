@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from ingestion.schemas.invoice_schema import DocumentExtraction
+from utils.config import EXTRACTION_DIR
 
 
 def save_document(
@@ -23,7 +24,7 @@ def save_document(
     else:
         filename = f"extracted_doc_{id(document)}.json"
 
-    output_dir = Path(__file__).resolve().parent.parent / "data" / "processed" / "extracted"
+    output_dir = EXTRACTION_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
 
     filepath = output_dir / filename

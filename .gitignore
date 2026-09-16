@@ -9,3 +9,11 @@ data/processed/
 .vscode/
 
 .DS_Store
+
+AGENTS.md
+CLAUDE.md
+EvoStrategy_Implementation_Plan.pdf
+EvoStrategy_Manuscript_preview.pdf
+data/raw/
+MAZIN_GAP_ANALYSIS.md
+evostrategy_dashboard/
