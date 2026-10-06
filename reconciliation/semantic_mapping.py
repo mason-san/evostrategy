@@ -245,6 +245,16 @@ _RULES: dict[str, tuple[SemanticRole, SemanticType]] = {
     "tax": (SemanticRole.TAX, SemanticType.AMOUNT),
     "discount": (SemanticRole.DISCOUNT, SemanticType.AMOUNT),
     "shipping": (SemanticRole.SHIPPING, SemanticType.AMOUNT),
+    "bill to": (SemanticRole.CUSTOMER, SemanticType.ENTITY),
+    "payer": (SemanticRole.CUSTOMER, SemanticType.ENTITY),
+    "counterparty": (SemanticRole.VENDOR, SemanticType.ENTITY),
+    "payment date": (SemanticRole.DOCUMENT_DATE, SemanticType.DATE),
+    "posting date": (SemanticRole.DOCUMENT_DATE, SemanticType.DATE),
+    "amount paid": (SemanticRole.AMOUNT_PAID, SemanticType.AMOUNT),
+    "balance due": (SemanticRole.BALANCE_DUE, SemanticType.AMOUNT),
+    "total": (SemanticRole.TRANSACTION_TOTAL, SemanticType.AMOUNT),
+    "grand total": (SemanticRole.TRANSACTION_TOTAL, SemanticType.AMOUNT),
+    "po number": (SemanticRole.ORDER_ID, SemanticType.IDENTIFIER),
 }
 
 _ROLE_DESCRIPTIONS: dict[SemanticRole, tuple[SemanticType, tuple[str, ...]]] = {
@@ -292,11 +302,30 @@ def _similarity(label: str, description: str) -> float:
     return round(max(overlap, sequence * 0.75), 3)
 
 
+_TYPE_ALIASES = {
+    "invoice": DocumentType.INVOICE,
+    "purchase order": DocumentType.PURCHASE_ORDER,
+    "po": DocumentType.PURCHASE_ORDER,
+    "payment": DocumentType.PAYMENT,
+    "payment memo": DocumentType.PAYMENT,
+    "receipt": DocumentType.PAYMENT,
+    "ledger": DocumentType.LEDGER,
+    "ledger entry": DocumentType.LEDGER,
+    "journal entry": DocumentType.LEDGER,
+}
+
+
 def _document_type(document: SourceDocument) -> DocumentType:
     explicit = normalize_label(document.document_type)
     for candidate in DocumentType:
         if explicit == normalize_label(candidate.value):
             return candidate
+    # A source document may state its own type (e.g. a "Document Type" column).
+    for field in document.fields:
+        if normalize_label(field.label) == "document type":
+            stated = _TYPE_ALIASES.get(normalize_label(str(field.value or "")))
+            if stated:
+                return stated
     labels = " ".join(normalize_label(field.label) for field in document.fields)
     if "purchase order" in labels or "po number" in labels:
         return DocumentType.PURCHASE_ORDER
@@ -306,6 +335,16 @@ def _document_type(document: SourceDocument) -> DocumentType:
         return DocumentType.INVOICE
     if "ledger" in labels:
         return DocumentType.LEDGER
+    # Fall back to the document's own title in the first OCR lines.
+    heading = normalize_label(" ".join((document.ocr_text or "").strip().splitlines()[:3]))
+    for keyword, candidate in (
+        ("purchase order", DocumentType.PURCHASE_ORDER),
+        ("payment advice", DocumentType.PAYMENT),
+        ("receipt", DocumentType.PAYMENT),
+        ("invoice", DocumentType.INVOICE),
+    ):
+        if keyword in heading:
+            return candidate
     return DocumentType.UNKNOWN
 
 
@@ -319,6 +358,8 @@ def _contextualize(candidates: Iterable[SemanticCandidate], document_type: Docum
             score += 0.12
         if candidate.role == SemanticRole.AMOUNT_PAID and document_type == DocumentType.PAYMENT:
             score += 0.12
+        if candidate.role == SemanticRole.TRANSACTION_TOTAL and document_type == DocumentType.LEDGER:
+            score += 0.12
         adjusted.append(SemanticCandidate(candidate.role, candidate.semantic_type, min(score, 1.0)))
     return sorted(adjusted, key=lambda item: item.score, reverse=True)
 
@@ -329,6 +370,7 @@ def _similarity_candidates(label: str, document_type: DocumentType) -> list[Sema
             DocumentType.INVOICE: SemanticRole.TRANSACTION_TOTAL,
             DocumentType.PURCHASE_ORDER: SemanticRole.ORDER_TOTAL,
             DocumentType.PAYMENT: SemanticRole.AMOUNT_PAID,
+            DocumentType.LEDGER: SemanticRole.TRANSACTION_TOTAL,
         }
         preferred = contextual_roles.get(document_type)
         if preferred:

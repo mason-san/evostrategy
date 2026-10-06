@@ -277,7 +277,9 @@ def normalize_identifier(value: Any) -> NormalizationResult:
     """Trim and case-fold an identifier while retaining meaningful punctuation."""
     if _missing(value):
         return NormalizationResult(None, NormalizationMethod.NONE, NormalizationStatus.MISSING)
-    normalized = re.sub(r"\s+", " ", str(value).strip()).upper()
+    # OCR often splits identifiers ("41 143" vs "41143"); whitespace is never
+    # meaningful for comparison, so the comparison form drops it entirely.
+    normalized = re.sub(r"\s+", "", str(value).strip()).upper()
     return NormalizationResult(normalized, NormalizationMethod.IDENTIFIER, NormalizationStatus.SUCCESS)
 
 
