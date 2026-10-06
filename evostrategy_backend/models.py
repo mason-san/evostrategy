@@ -1,6 +1,6 @@
-"""API models for document-ingestion jobs."""
+"""API models for the EvoStrategy backend."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -27,3 +27,29 @@ class IngestionJob(BaseModel):
     steps: list[PipelineStep]
     message: str
     error: str | None = None
+    log: list[str] = Field(default_factory=list)
+    failures: list[dict[str, Any]] = Field(default_factory=list)
+    summary: dict[str, Any] | None = None
+
+
+class ReviewRequest(BaseModel):
+    """A reviewer decision on one reconciliation case."""
+
+    action: Literal["ACCEPT", "REJECT", "CORRECT"]
+    reviewer: str = Field(min_length=1, max_length=80)
+    reason: str | None = Field(default=None, max_length=1000)
+    field: Literal["amount", "date", "category", "counterparty"] | None = None
+    corrected_value: str | None = Field(default=None, max_length=200)
+
+
+class ScenarioRequest(BaseModel):
+    """What-if levers; all optional."""
+
+    horizon: int = Field(default=6, ge=1, le=24)
+    volume_change_pct: float = Field(default=0, ge=-90, le=300)
+    pricing_adjustment_pct: float = Field(default=0, ge=-90, le=300)
+    price_elasticity: float = Field(default=0.5, ge=0, le=5)
+    headcount_change: int = Field(default=0, ge=-1000, le=1000)
+    baseline_headcount: int = Field(default=15, ge=1, le=100000)
+    vendor_consolidation_pct: float = Field(default=0, ge=0, le=90)
+    other_cost_change_pct: float = Field(default=0, ge=-90, le=300)
