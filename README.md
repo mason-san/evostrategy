@@ -9,6 +9,16 @@ Document Reconciliation Pipeline and Verified Revenue Intelligence System
 - Ayushi Rastogi — Verification Dashboard
 - Prateek M Hulamani — Analytics & Forecasting
 
+## System architecture
+
+The integrated target flow is:
+
+`source documents -> generic extraction -> canonical mapping/linking -> reconciliation -> human verification -> verified analytics`
+
+Stage 1 remains source-faithful. Mapping and reconciliation are explicit downstream
+stages so every analytical result can be traced to its source fields and review
+actions.
+
 ## Stage 1 — OCR & Document Ingestion Module
 
 This module takes raw document PDFs (invoices, purchase orders, payment memos, ledgers, etc.), converts them into images, extracts text via OCR, performs generic structured field extraction using Google Gemini LLM, validates the data into a generic `DocumentExtraction` schema, and saves it as JSON for Stage 2 processing.
