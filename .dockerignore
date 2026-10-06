@@ -1,0 +1,9 @@
+.git
+**/node_modules
+**/__pycache__
+venv
+data/processed
+data/demo
+evostrategy_frontend/dist
+evostrategy_backend/uploads
+*.pdf.bak

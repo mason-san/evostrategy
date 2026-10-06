@@ -32,8 +32,8 @@ export GEMINI_API_KEY="your-key-here"
 ## Running the Pipeline
 
 ```bash
-# Process a single document (currently hardcoded to invoice_012.pdf in pipeline.py)
-python pipeline.py
+python pipeline.py demo          # full flow on the demo dataset
+python pipeline.py run <paths>   # ingest + reconcile your own files
 ```
 
 ## Architecture
@@ -81,3 +81,23 @@ python pipeline.py
 | `ingestion/extraction/llm_parser.py` | Gemini-based generic document parser |
 | `ingestion/schemas/invoice_schema.py` | Generic `DocumentExtraction` Pydantic model |
 | `utils/save_json.py` | JSON serialization |
+
+## Integrated system (Phase 2+)
+
+The repo now runs the full flow; see README.md for details.
+
+- `pipeline.py` — CLI: `demo`, `run <paths>`, `reconcile`, `status`, `reset`
+- `ingestion/service.py` — `ingest_file()` for PDF / images / DOCX / CSV / XLSX
+- `ingestion/extraction/dispatcher.py` — Gemini, Ollama, or offline `rule_parser.py`
+- `reconciliation/orchestrator.py` — `reconcile_documents()` chains mapping,
+  normalization, linking, comparisons, cases and transactions
+- `storage/registry.py` — SQLite: documents, links, transactions, cases, review log
+- `analytics/` — `verified.py` (the reconciliation gate), `aggregates.py`,
+  `forecasting.py` (regression + ARIMA + backtest), `whatif.py`
+- `evostrategy_backend/` — FastAPI (`uvicorn evostrategy_backend.main:app`)
+- `evostrategy_frontend/` — React workspace (`npm ci && npm run build`)
+- Tests: `pytest` (tests/conftest.py isolates storage in a temp dir)
+
+Rules that must hold: Stage 1 never renames or normalizes labels/values;
+analytics only reads `analytics.verified.verified_transactions()`; reviewer
+decisions are never overwritten by reruns.

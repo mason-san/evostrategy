@@ -1,0 +1,29 @@
+# Local, single-machine deployment. Data stays in the evostrategy-data volume.
+#   docker compose up --build        then open http://localhost:8000
+# Optional: run a local LLM with the "ollama" profile (no internet needed after pull)
+#   docker compose --profile ollama up --build
+#   docker compose exec ollama ollama pull llama3.1:8b
+services:
+  evostrategy:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"   # local machine only
+    environment:
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
+    volumes:
+      - evostrategy-data:/data
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  evostrategy-data:
+  ollama-models:
