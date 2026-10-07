@@ -54,8 +54,9 @@ def breakdown(transactions: list[dict[str, Any]], key: str, kind: str, top: int 
 def budget_consumption(transactions: list[dict[str, Any]], budgets: dict[str, float] | None = None) -> dict[str, Any]:
     """Expense by category for the latest year vs a budget.
 
-    Without explicit budgets, each category's budget is the previous year's
-    spend for the same months plus 5% — a transparent, editable default.
+    A configured budget is an annual figure, so consumption is "share of the
+    year's budget used so far". Without one, each category's budget is the
+    previous year's spend for the same months plus 5% — a transparent default.
     """
     expenses = [t for t in transactions if t["kind"] == "expense"]
     if not expenses:
@@ -82,6 +83,7 @@ def budget_consumption(transactions: list[dict[str, Any]], budgets: dict[str, fl
             "budget": budget,
             "consumption": round(spent / budget, 4) if budget else None,
             "budget_source": "configured" if budgets and category in budgets else "prior year +5%",
+            "budget_period": "annual" if budgets and category in budgets else f"Jan-{through:02d} of prior year",
         })
     rows.sort(key=lambda row: row["spent"], reverse=True)
     return {"year": year, "through_month": through, "categories": rows}
@@ -103,7 +105,13 @@ def traceability(all_transactions: list[dict[str, Any]], verified: list[dict[str
     }
 
 
-def overview(all_transactions: list[dict[str, Any]], verified: list[dict[str, Any]]) -> dict[str, Any]:
+def overview(
+    all_transactions: list[dict[str, Any]],
+    verified: list[dict[str, Any]],
+    budgets: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    from analytics.finance import quarterly_series
+
     series = monthly_series(verified)
     revenue = sum(series["revenue"])
     expense = sum(series["expense"])
@@ -115,9 +123,11 @@ def overview(all_transactions: list[dict[str, Any]], verified: list[dict[str, An
             "margin": round((revenue - expense) / revenue, 4) if revenue else None,
         },
         "monthly": series,
+        "quarterly": quarterly_series(verified),
         "revenue_by_category": breakdown(verified, "category", "revenue"),
         "expense_by_category": breakdown(verified, "category", "expense"),
         "top_counterparties": breakdown(verified, "counterparty", "expense", top=6),
-        "budget": budget_consumption(verified),
+        "budget": budget_consumption(verified, budgets),
+        "expense_by_counterparty": breakdown(verified, "counterparty", "expense", top=12),
         "traceability": traceability(all_transactions, verified),
     }

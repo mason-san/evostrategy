@@ -140,6 +140,42 @@ def backtest(values: list[float], holdout: int, level: float = FORECAST_CONFIDEN
     }
 
 
+def rolling_backtest(values: list[float], *, horizon: int = 3, origins: int = 4,
+                     level: float = FORECAST_CONFIDENCE_LEVEL) -> dict[str, Any] | None:
+    """Rolling-origin evaluation: forecast ``horizon`` months from several cut-off points.
+
+    A single holdout can be lucky or unlucky. Here the series is cut at
+    ``origins`` different months; each time the models see only the data
+    before the cut and forecast the next ``horizon`` months. MAPE is averaged.
+    """
+    usable = [k for k in range(origins) if len(values) - horizon - k * horizon >= 8]
+    if not usable:
+        return None
+    scores: dict[str, list[float]] = {"linear_regression": [], "arima": [], "ensemble": []}
+    for k in usable:
+        cut = len(values) - horizon - k * horizon
+        train, actual = values[:cut], values[cut:cut + horizon]
+        linear = linear_forecast(train, horizon, level)
+        arima = arima_forecast(train, horizon, level)
+        for name, model in (("linear_regression", linear), ("arima", arima), ("ensemble", ensemble(linear, arima))):
+            value = mape(actual, model["point"])
+            if value is not None:
+                scores[name].append(value)
+    return {
+        "origins": len(usable),
+        "horizon_months": horizon,
+        "mape": {name: round(sum(v) / len(v), 2) if v else None for name, v in scores.items()},
+        "worst_ensemble_mape": max(scores["ensemble"]) if scores["ensemble"] else None,
+        "target_mape": MAPE_TARGET,
+    }
+
+
+def clip_non_negative(model: dict[str, Any]) -> dict[str, Any]:
+    """Revenue and expenses cannot be negative; a falling trend stops at zero."""
+    clipped = {key: [max(0.0, v) for v in model[key]] for key in ("point", "lower", "upper")}
+    return {**model, **clipped, "clipped_at_zero": any(v < 0 for v in model["point"] + model["lower"])}
+
+
 def forecast_series(
     months: list[str],
     values: list[float],
@@ -147,6 +183,7 @@ def forecast_series(
     horizon: int,
     level: float = FORECAST_CONFIDENCE_LEVEL,
     holdout: int = 6,
+    non_negative: bool = False,
 ) -> dict[str, Any]:
     """Forecast one monthly series and report how trustworthy it is."""
     if len(values) < 3:
@@ -154,13 +191,17 @@ def forecast_series(
     linear = linear_forecast(values, horizon, level)
     arima = arima_forecast(values, horizon, level)
     combined = ensemble(linear, arima)
+    if non_negative:
+        linear, arima, combined = (clip_non_negative(m) for m in (linear, arima, combined))
     test = backtest(values, holdout, level)
+    rolling = rolling_backtest(values, level=level)
     return {
         "history": {"months": months, "values": [round(v, 2) for v in values]},
         "forecast_months": _next_months(months[-1], horizon),
         "confidence_level": level,
         "models": {"linear_regression": linear, "arima": arima, "ensemble": combined},
         "backtest": test,
+        "rolling_backtest": rolling,
         "meets_target": bool(test and test["mape"]["ensemble"] is not None and test["mape"]["ensemble"] <= MAPE_TARGET),
     }
 
@@ -169,6 +210,6 @@ def forecast_all(series: dict[str, list], horizon: int, level: float = FORECAST_
     """Forecast revenue, expense and profit from a ``monthly_series`` result."""
     months = series["months"]
     return {
-        metric: forecast_series(months, series[metric], horizon=horizon, level=level)
+        metric: forecast_series(months, series[metric], horizon=horizon, level=level, non_negative=metric != "profit")
         for metric in ("revenue", "expense", "profit")
     }

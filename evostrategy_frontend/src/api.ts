@@ -131,9 +131,54 @@ export type Overview = {
   revenue_by_category: Breakdown[];
   expense_by_category: Breakdown[];
   top_counterparties: Breakdown[];
-  budget: { year: number | null; through_month: number | null; categories: Array<{ category: string; spent: number; budget: number; consumption: number | null; budget_source: string }> };
-  traceability: { verified_records: number; total_records: number; source_documents: number; date_from: string | null; date_to: string | null; status_counts: Record<string, number> };
+  expense_by_counterparty: Breakdown[];
+  quarterly: { quarters: string[]; revenue: number[]; expense: number[]; profit: number[]; complete: boolean[] };
+  budget: { year: number | null; through_month: number | null; categories: Array<{ category: string; spent: number; budget: number; consumption: number | null; budget_source: string; budget_period?: string }> };
+  traceability: { verified_records: number; total_records: number; source_documents: number; date_from: string | null; date_to: string | null; status_counts: Record<string, number>; data_source?: DataSource };
 };
+
+export type DataSource = { documents_by_type: Record<string, number>; demo_documents: number; uploaded_documents: number; is_demo: boolean; note: string };
+export type Trace = { verified_records: number; date_from: string | null; date_to: string | null; data_source: DataSource };
+
+export type Runway = {
+  configured: boolean;
+  message?: string;
+  error?: string;
+  cash_balance?: number;
+  cash_as_of?: string;
+  cash_source?: string;
+  history?: { months: string[]; balance: number[] };
+  projection?: { months: string[]; point: number[]; lower: number[]; upper: number[] };
+  monthly_net_burn?: number;
+  burning_cash?: boolean;
+  runway_months?: number | null;
+  runway_months_range?: { pessimistic: number | null; optimistic: number | null };
+  cash_out_month?: string | null;
+  confidence_level?: number;
+  method?: string;
+  summary?: string;
+  traceability?: Trace;
+};
+
+export type FinanceSettings = { cash_balance: number | null; cash_as_of: string | null; headcount: number | null; source?: string };
+export type Settings = { budgets: Record<string, number>; finance: Partial<FinanceSettings> };
+
+export type Metrics = {
+  evaluation: null | {
+    generated_at: string;
+    h1_extraction: { target: number; results: Array<{ dataset: string; correct: number; fields: number; accuracy: number; meets_target: boolean }> };
+    h2_reconciliation: { targets: { precision: number; recall: number }; results: Array<{ dataset: string; genuine_issues: number; flagged: number; true_positives: number; precision: number; recall: number; meets_target: boolean; quality_flags?: number }> };
+    h3_forecasting: { error?: string; target_mape?: number; history_months?: number; period?: string[]; metrics?: Record<string, { holdout_6m_mape: Record<string, number | null>; rolling_3m_mape: Record<string, number | null>; meets_target_holdout: boolean; meets_target_rolling: boolean }> };
+    h4_review_efficiency: { target: number; demo: Efficiency; by_problem_rate: Array<Efficiency & { problem_share: number }> };
+  };
+  evaluation_available: boolean;
+  how_to_refresh: string;
+  live_review_efficiency: Efficiency;
+  audit_chain: AuditChain;
+  second_ocr_engine: string;
+};
+export type Efficiency = { documents_needing_reconciliation: number; documents_needing_a_human: number; documents_cleared_automatically: number; reduction: number | null; target: number; meets_target: boolean; method: string; caveat: string };
+export type AuditChain = { entries: number; chained: number; legacy_unchained: number; intact: boolean; problems: Array<{ id: number; problem: string }> };
 
 export type ModelForecast = { model: string; point: number[]; lower: number[]; upper: number[]; params?: Record<string, unknown> };
 export type Forecast = {
@@ -144,7 +189,11 @@ export type Forecast = {
   confidence_level: number;
   models: { linear_regression: ModelForecast; arima: ModelForecast; ensemble: ModelForecast };
   backtest: null | { holdout_months: number; actual: number[]; mape: Record<string, number | null>; interval_coverage: number; target_mape: number };
+  rolling_backtest: null | { origins: number; horizon_months: number; mape: Record<string, number | null>; worst_ensemble_mape: number | null; target_mape: number };
   meets_target: boolean;
+  traceability?: Trace;
+  snapshot_id?: number;
+  input_hash?: string;
 };
 
 export type ScenarioInput = {
@@ -163,7 +212,10 @@ export type ScenarioResult = {
   assumptions: Record<string, number | string>;
   months: Array<{ month: string; baseline: PL; scenario: PL }>;
   totals: { baseline: PL; scenario: PL; delta: PL };
+  budget: { annual_budget: number | null; budget_source: string; window_budget: number | null; baseline_consumption: number | null; scenario_consumption: number | null };
+  runway: { configured: boolean; starting_cash: number | null; baseline: CashPath | null; scenario: CashPath | null };
 };
+type CashPath = { ending_cash: number; runway_months: number | null; burning_cash: boolean };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
@@ -206,6 +258,12 @@ export const api = {
   overview: () => request<Overview>("/api/analytics/overview"),
   forecast: (metric: string, horizon: number) => request<Forecast>(`/api/forecast?metric=${metric}&horizon=${horizon}`),
   whatif: (input: ScenarioInput) => request<ScenarioResult>("/api/whatif", json(input)),
+  runway: () => request<Runway>("/api/runway"),
+  settings: () => request<Settings>("/api/settings"),
+  saveSettings: (body: Partial<{ budgets: Record<string, number>; finance: Partial<FinanceSettings> }>) =>
+    request<Settings>("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  metrics: () => request<Metrics>("/api/metrics"),
+  auditChain: () => request<AuditChain>("/api/audit/verify"),
 };
 
 export const money = (value: number | null | undefined, compact = false) =>
@@ -226,5 +284,6 @@ export const humanize = (value: string | null | undefined) =>
 
 export const monthLabel = (month: string) => {
   const [year, m] = month.split("-");
+  if (m?.startsWith("Q")) return `${m} ${year.slice(2)}`;   // "2012-Q3" -> "Q3 12"
   return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1]} ${year.slice(2)}`;
 };

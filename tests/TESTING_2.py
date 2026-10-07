@@ -153,7 +153,8 @@ class StorageAndUtilityTesting2(unittest.TestCase):
     def test_project_paths_are_rooted_at_repository(self) -> None:
         """Central configuration resolves paths from the repository root."""
         self.assertTrue(PROJECT_ROOT.exists())
-        self.assertEqual(PROJECT_ROOT.name, "evostrategy")
+        # the clone may live in any folder name (e.g. evostrategy-backup)
+        self.assertTrue((PROJECT_ROOT / "pipeline.py").is_file())
 
 
 if __name__ == "__main__":

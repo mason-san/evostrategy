@@ -1,0 +1,616 @@
+{
+ "samples": [
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.836,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.9072,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.836,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.9025,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.855,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.855,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.9057,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.8645,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.8455,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.9088,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.8075,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.836,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.8867,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.779,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.8962,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.9025,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.8645,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.9088,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.855,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.9025,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.9072,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.855,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.9057,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.8455,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.8423,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.8645,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.9088,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.855,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.8265,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.8455,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.9025,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.1362,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.8867,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.9072,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.855,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.8265,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.9072,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_number",
+   "confidence": 0.8455,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "invoice_date",
+   "confidence": 0.9025,
+   "correct": true
+  },
+  {
+   "set": "clean",
+   "field": "total_amount",
+   "confidence": 0.9025,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.8265,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.9072,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.855,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.8882,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_date",
+   "confidence": 0.9025,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.8882,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_date",
+   "confidence": 0.9057,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.836,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.76,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.9025,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.456,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.855,
+   "correct": false
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.817,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.3072,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.8977,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.8122,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.9072,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.3515,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_date",
+   "confidence": 0.7848,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.893,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.437,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.8882,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.5605,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_date",
+   "confidence": 0.5327,
+   "correct": false
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.9072,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.8312,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.9072,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.8075,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.912,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.5795,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.9072,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_number",
+   "confidence": 0.8423,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "invoice_date",
+   "confidence": 0.2805,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.9072,
+   "correct": true
+  },
+  {
+   "set": "scan",
+   "field": "total_amount",
+   "confidence": 0.8645,
+   "correct": true
+  }
+ ],
+ "unreadable": 20,
+ "table": [
+  {
+   "threshold": 0.3,
+   "caught": 0.0,
+   "false_alarm": 0.022
+  },
+  {
+   "threshold": 0.4,
+   "caught": 0.0,
+   "false_alarm": 0.043
+  },
+  {
+   "threshold": 0.5,
+   "caught": 0.0,
+   "false_alarm": 0.065
+  },
+  {
+   "threshold": 0.6,
+   "caught": 0.5,
+   "false_alarm": 0.087
+  },
+  {
+   "threshold": 0.7,
+   "caught": 0.5,
+   "false_alarm": 0.087
+  },
+  {
+   "threshold": 0.75,
+   "caught": 0.5,
+   "false_alarm": 0.087
+  },
+  {
+   "threshold": 0.8,
+   "caught": 0.5,
+   "false_alarm": 0.12
+  },
+  {
+   "threshold": 0.85,
+   "caught": 0.5,
+   "false_alarm": 0.315
+  },
+  {
+   "threshold": 0.9,
+   "caught": 1.0,
+   "false_alarm": 0.522
+  }
+ ]
+}

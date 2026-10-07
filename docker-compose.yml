@@ -1,13 +1,20 @@
-# Local, single-machine deployment. Data stays in the evostrategy-data volume.
-#   docker compose up --build        then open http://localhost:8000
-# Optional: run a local LLM with the "ollama" profile (no internet needed after pull)
-#   docker compose --profile ollama up --build
-#   docker compose exec ollama ollama pull llama3.1:8b
+# EvoStrategy — local, single-workstation ("shoebox") deployment in three tiers.
+#
+#   presentation   nginx: the workspace UI, on http://localhost:8000 (this machine only)
+#   processing     FastAPI + OCR + reconciliation + analytics (no published port)
+#   data           the evostrategy-data volume: SQLite registry, page images, uploads
+#
+#   docker compose up --build                  then open http://localhost:8000
+#   docker compose --profile ollama up --build # + a local LLM, no internet after the model pull
+#     docker compose exec ollama ollama pull llama3.1:8b
+#
+# To let other computers on the office network use it, change the presentation
+# port to "8000:80" (this exposes it to your LAN, never to the internet by itself).
 services:
-  evostrategy:
-    build: .
-    ports:
-      - "127.0.0.1:8000:8000"   # local machine only
+  processing:
+    build:
+      context: .
+      target: app
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -15,6 +22,16 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
     volumes:
       - evostrategy-data:/data
+    restart: unless-stopped
+
+  presentation:
+    build:
+      context: .
+      target: web
+    ports:
+      - "127.0.0.1:8000:80"
+    depends_on:
+      - processing
     restart: unless-stopped
 
   ollama:
@@ -25,5 +42,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  evostrategy-data:
+  evostrategy-data:     # data tier
   ollama-models:

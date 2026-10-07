@@ -18,7 +18,7 @@ from pathlib import Path
 from ingestion.extraction.dispatcher import parse_document
 from ingestion.schemas.contracts import SourceDocument, source_document_from_extraction
 from ingestion.schemas.invoice_schema import DocumentExtraction
-from utils.config import LOW_CONFIDENCE_THRESHOLD
+from utils.config import KEY_FIELD_REVIEW_THRESHOLD, LOW_CONFIDENCE_THRESHOLD
 
 PDF_TYPES = {".pdf"}
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
@@ -100,7 +100,8 @@ def ingest_file(path: Path) -> list[SourceDocument]:
                    ocr_confidence=None, page_images=[])
         ]
 
-    from ingestion.ocr.tesseract_engine import extract_text_with_confidence
+    from ingestion.ocr import paddle_engine
+    from ingestion.ocr.tesseract_engine import ocr_pages
 
     if suffix in PDF_TYPES:
         from ingestion.pdf.pdf_to_image import pdf_to_images
@@ -108,16 +109,23 @@ def ingest_file(path: Path) -> list[SourceDocument]:
         images = pdf_to_images(path)
     else:
         images = [path]
-    text, ocr_confidence = extract_text_with_confidence(images)
-    extraction, method = parse_document(text, ocr_confidence)
-    return [
-        _build(
-            path.stem,
-            path,
-            extraction,
-            method=method,
-            ocr_text=text,
-            ocr_confidence=ocr_confidence,
-            page_images=[str(image) for image in images],
-        )
-    ]
+    ocr = ocr_pages(images)
+    second = (ocr.second_opinion or {}).get("text")
+    extraction, method = parse_document(ocr.text, ocr.confidence, ocr_words=ocr.words,
+                                        second_opinion_text=second)
+    document = _build(
+        path.stem,
+        path,
+        extraction,
+        method=method,
+        ocr_text=ocr.text,
+        ocr_confidence=ocr.confidence,
+        page_images=[str(image) for image in images],
+    )
+    low_fields = [f.label for f in document.fields if f.confidence is not None and f.confidence < KEY_FIELD_REVIEW_THRESHOLD]
+    return [document.model_copy(update={
+        "ocr_engine": "tesseract" + (" + paddleocr" if second else ""),
+        "ocr_pages": ocr.pages,
+        "second_engine": paddle_engine.status(),
+        "low_confidence_fields": low_fields,
+    })]

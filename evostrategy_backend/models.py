@@ -53,3 +53,18 @@ class ScenarioRequest(BaseModel):
     baseline_headcount: int = Field(default=15, ge=1, le=100000)
     vendor_consolidation_pct: float = Field(default=0, ge=0, le=90)
     other_cost_change_pct: float = Field(default=0, ge=-90, le=300)
+
+
+class FinanceSettings(BaseModel):
+    """Inputs that cannot be read from documents: cash on hand and headcount."""
+
+    cash_balance: float | None = Field(default=None, ge=-1e12, le=1e12)
+    cash_as_of: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}$", description="YYYY-MM; default = latest verified month")
+    headcount: int | None = Field(default=None, ge=1, le=100000)
+
+
+class SettingsRequest(BaseModel):
+    """Annual expense budgets per category and finance settings; omit a key to leave it unchanged."""
+
+    budgets: dict[str, float] | None = None
+    finance: FinanceSettings | None = None

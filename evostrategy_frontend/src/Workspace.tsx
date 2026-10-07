@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Loading, useLoad } from "./hooks";
+import { DataSourceNote, EvaluationView, RunwayView, SettingsView } from "./Finance";
 import {
   api, humanize, money, monthLabel, percent,
   type CaseDetail, type CaseRow, type DocumentDetail, type DocumentRow, type Forecast,
@@ -6,7 +8,7 @@ import {
 } from "./api";
 import { BarList, LineChart, Meter } from "./charts";
 
-type View = "overview" | "review" | "documents" | "analytics" | "forecast" | "whatif" | "audit";
+type View = "overview" | "review" | "documents" | "analytics" | "forecast" | "runway" | "whatif" | "audit" | "evaluation" | "settings";
 
 const NAV: Array<{ key: View; label: string; group: string }> = [
   { key: "overview", label: "Overview", group: "Workspace" },
@@ -15,7 +17,10 @@ const NAV: Array<{ key: View; label: string; group: string }> = [
   { key: "audit", label: "Audit log", group: "Verification" },
   { key: "analytics", label: "Analytics", group: "Intelligence" },
   { key: "forecast", label: "Forecast", group: "Intelligence" },
+  { key: "runway", label: "Cash runway", group: "Intelligence" },
   { key: "whatif", label: "What-if", group: "Intelligence" },
+  { key: "evaluation", label: "Evaluation", group: "System" },
+  { key: "settings", label: "Settings", group: "System" },
 ];
 
 const STATUS_TONE: Record<string, string> = {
@@ -29,25 +34,6 @@ function StatusPill({ status }: { status: string | null | undefined }) {
   return <span className={`pill ${STATUS_TONE[status] ?? "neutral"}`}>{humanize(status)}</span>;
 }
 
-function useLoad<T>(loader: () => Promise<T>, deps: unknown[]) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const reload = useCallback(() => {
-    setLoading(true);
-    loader().then((value) => { setData(value); setError(""); })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load data."))
-      .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
-  useEffect(reload, [reload]);
-  return { data, error, loading, reload };
-}
-
-function Loading({ error }: { error?: string }) {
-  return error ? <div className="notice error">{error}</div> : <div className="loading">Loading…</div>;
-}
-
 function Traceability({ overview }: { overview: OverviewData }) {
   const t = overview.traceability;
   const pending = (t.status_counts.PENDING_REVIEW ?? 0) + (t.status_counts.QUARANTINED ?? 0);
@@ -57,6 +43,7 @@ function Traceability({ overview }: { overview: OverviewData }) {
       Built from {t.verified_records} verified records ({t.source_documents} source documents)
       {t.date_from && <> · {t.date_from} → {t.date_to}</>}
       {pending > 0 && <> · {pending} record{pending === 1 ? "" : "s"} excluded until reviewed</>}
+      {t.data_source && <DataSourceNote source={t.data_source} />}
     </p>
   );
 }
@@ -367,12 +354,20 @@ function DocumentsView() {
 
 function AnalyticsView({ version }: { version: string }) {
   const { data, error } = useLoad(api.overview, [version]);
+  const [period, setPeriod] = useState<"monthly" | "quarterly">("monthly");
   if (!data) return <Loading error={error} />;
-  const m = data.monthly;
+  const q = data.quarterly;
+  const m = period === "monthly" ? data.monthly : { months: q.quarters, revenue: q.revenue, expense: q.expense, profit: q.profit };
+  const partial = period === "quarterly" ? q.quarters.filter((_, i) => !q.complete[i]) : [];
   return (
     <>
       <section className="card">
-        <header className="card-head"><h3>Monthly profit & loss</h3><span className="mono-muted">verified records only</span></header>
+        <header className="card-head"><h3>{period === "monthly" ? "Monthly" : "Quarterly"} profit & loss</h3>
+          <div className="segmented small">
+            {(["monthly", "quarterly"] as const).map((p) => <button key={p} className={period === p ? "active" : ""} onClick={() => setPeriod(p)}>{humanize(p)}</button>)}
+          </div>
+        </header>
+        {partial.length > 0 && <p className="muted small">{partial.join(", ")} {partial.length === 1 ? "is" : "are"} not complete yet (fewer than 3 months of data).</p>}
         <LineChart labels={m.months} series={[
           { name: "Revenue", values: m.revenue, color: "#4f46e5" },
           { name: "Expenses", values: m.expense, color: "#c2410c" },
@@ -387,14 +382,14 @@ function AnalyticsView({ version }: { version: string }) {
               <div key={row.category} className="budget-row">
                 <div className="bar-copy"><span>{row.category}</span><strong>{percent(row.consumption, 0)}</strong></div>
                 <Meter value={row.consumption} />
-                <small className="mono-muted">{money(row.spent, true)} of {money(row.budget, true)} · {row.budget_source}</small>
+                <small className="mono-muted">{money(row.spent, true)} of {money(row.budget, true)} · {row.budget_source}{row.budget_period === "annual" ? " (annual)" : ""}</small>
               </div>
             ))}
           </div>
         </section>
         <section className="card">
-          <header className="card-head"><h3>Largest suppliers</h3></header>
-          <BarList rows={data.top_counterparties} color="#c2410c" />
+          <header className="card-head"><h3>Spend by vendor</h3><span className="mono-muted">verified expenses</span></header>
+          <BarList rows={data.expense_by_counterparty ?? data.top_counterparties} color="#c2410c" />
           <header className="card-head spaced"><h3>Revenue mix</h3></header>
           <BarList rows={data.revenue_by_category} />
         </section>
@@ -430,6 +425,14 @@ function ForecastView({ version }: { version: string }) {
         const e = data.models.ensemble;
         return (
           <>
+            {data.traceability && (
+              <p className="trace">
+                <span className="trace-dot" />
+                Built from {data.traceability.verified_records} verified records · {data.traceability.date_from} → {data.traceability.date_to}
+                {data.snapshot_id && <> · saved as forecast #{data.snapshot_id} (inputs {data.input_hash})</>}
+                <DataSourceNote source={data.traceability.data_source} />
+              </p>
+            )}
             <section className="card">
               <header className="card-head"><h3>{humanize(metric)} forecast · next {horizon} months</h3><span className="mono-muted">{Math.round(data.confidence_level * 100)}% interval</span></header>
               <LineChart labels={labels} divider={h - 1}
@@ -456,8 +459,15 @@ function ForecastView({ version }: { version: string }) {
                       </tbody>
                     </table>
                     <p className="muted small">Tested by hiding the last {data.backtest.holdout_months} verified months and forecasting them. The {Math.round(data.confidence_level * 100)}% interval contained {percent(data.backtest.interval_coverage)} of those months.</p>
+                    {data.rolling_backtest && (
+                      <p className="muted small">
+                        Stricter check — forecasting {data.rolling_backtest.horizon_months} months ahead from {data.rolling_backtest.origins} different cut-off points:
+                        ensemble MAPE <b className={data.rolling_backtest.mape.ensemble !== null && data.rolling_backtest.mape.ensemble <= data.rolling_backtest.target_mape ? "pos" : "neg"}>{data.rolling_backtest.mape.ensemble}%</b>
+                        {" "}(worst {data.rolling_backtest.worst_ensemble_mape}%).
+                      </p>
+                    )}
                   </>
-                ) : <p className="muted">Not enough history for a backtest yet (needs 14+ months).</p>}
+                ) : <p className="muted">Not enough verified history to measure accuracy yet (needs 14+ months). The forecast is shown, but its error is unknown.</p>}
               </section>
               <section className="card">
                 <header className="card-head"><h3>Projected months</h3></header>
@@ -494,6 +504,12 @@ function Slider({ label, value, min, max, step = 1, unit = "%", onChange }: { la
 
 function WhatIfView({ version }: { version: string }) {
   const [input, setInput] = useState<ScenarioInput>(DEFAULT_SCENARIO);
+  useEffect(() => {
+    api.settings().then((settings) => {
+      const headcount = settings.finance.headcount;
+      if (headcount) setInput((current) => ({ ...current, baseline_headcount: headcount }));
+    }).catch(() => { /* keep the default headcount */ });
+  }, []);
   const [result, setResult] = useState<ScenarioResult | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -544,6 +560,38 @@ function WhatIfView({ version }: { version: string }) {
                 { name: "Scenario", values: result.months.map((r) => r.scenario.profit), color: "#4f46e5" },
               ]} />
             </section>
+            <div className="grid-2">
+              <section className="card">
+                <header className="card-head"><h3>Budget over {input.horizon} months</h3><span className="mono-muted">{result.budget.budget_source}</span></header>
+                {result.budget.window_budget ? (
+                  <div className="budget-list">
+                    {(["baseline", "scenario"] as const).map((kind) => (
+                      <div className="budget-row" key={kind}>
+                        <div className="bar-copy"><span>{humanize(kind)}</span><strong>{percent(result.budget[`${kind}_consumption`], 0)}</strong></div>
+                        <Meter value={result.budget[`${kind}_consumption`]} />
+                        <small className="mono-muted">{money(result.totals[kind].expense, true)} of {money(result.budget.window_budget, true)}</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="muted">No expense history to derive a budget from.</p>}
+              </section>
+              <section className="card">
+                <header className="card-head"><h3>Cash & runway</h3></header>
+                {result.runway.configured && result.runway.baseline && result.runway.scenario ? (
+                  <table className="data-table compact">
+                    <thead><tr><th></th><th className="num">Cash after {input.horizon} mo</th><th className="num">Runway</th></tr></thead>
+                    <tbody>{(["baseline", "scenario"] as const).map((kind) => {
+                      const path = result.runway[kind]!;
+                      return (
+                        <tr key={kind}><td>{humanize(kind)}</td><td className="num mono">{money(path.ending_cash, true)}</td>
+                          <td className="num mono">{path.runway_months ? `${path.runway_months} months` : path.burning_cash ? "> horizon" : "not burning cash"}</td></tr>
+                      );
+                    })}</tbody>
+                  </table>
+                ) : <p className="muted">Add your cash balance in Settings to see the runway impact.</p>}
+                <p className="muted small">Starting cash {money(result.runway.starting_cash, true)}.</p>
+              </section>
+            </div>
             <section className="card">
               <header className="card-head"><h3>Assumptions</h3></header>
               <ul className="assumptions">
@@ -564,9 +612,18 @@ function WhatIfView({ version }: { version: string }) {
 
 function AuditView({ version }: { version: string }) {
   const { data, error } = useLoad<ReviewAction[]>(api.audit, [version]);
+  const { data: chain } = useLoad(api.auditChain, [version]);
   if (!data) return <Loading error={error} />;
   if (!data.length) return <p className="muted empty">No reviewer decisions yet. Every ACCEPT, REJECT and CORRECT will be recorded here.</p>;
   return (
+    <>
+    {chain && (
+      <p className={`notice ${chain.intact ? "ok" : "error"}`}>
+        {chain.intact
+          ? `Tamper check passed: all ${chain.chained} chained entries match their SHA-256 fingerprints${chain.legacy_unchained ? ` (${chain.legacy_unchained} older entries predate the chain)` : ""}.`
+          : `Tamper check FAILED: ${chain.problems.map((p) => `entry ${p.id} — ${p.problem}`).join("; ")}`}
+      </p>
+    )}
     <div className="card flush table-wrap">
       <table className="data-table">
         <thead><tr><th>When (UTC)</th><th>Reviewer</th><th>Decision</th><th>Case</th><th>Correction</th><th>Reason</th></tr></thead>
@@ -581,6 +638,7 @@ function AuditView({ version }: { version: string }) {
         ))}</tbody>
       </table>
     </div>
+    </>
   );
 }
 
@@ -593,7 +651,10 @@ const TITLES: Record<View, [string, string]> = {
   audit: ["Audit log", "Append-only record of every reviewer decision."],
   analytics: ["Analytics", "Trends and budgets built only from reconciled records."],
   forecast: ["Forecast", "Linear regression and ARIMA, combined, with an honest accuracy check."],
+  runway: ["Cash runway", "How long verified cash flow lasts, projected by linear regression with an 85% interval."],
   whatif: ["What-if", "Test decisions against the verified baseline before you make them."],
+  evaluation: ["Evaluation", "The project's four hypotheses, measured — not estimated."],
+  settings: ["Settings", "What documents cannot tell us: budgets, cash on hand and headcount."],
 };
 
 function readReviewer() {
@@ -657,6 +718,9 @@ export function Workspace({ onAddDocuments, onLoadDemo }: { onAddDocuments: () =
         {summary?.has_data && view === "forecast" && <ForecastView version={version} />}
         {summary?.has_data && view === "whatif" && <WhatIfView version={version} />}
         {summary?.has_data && view === "audit" && <AuditView version={version} />}
+        {summary?.has_data && view === "runway" && <RunwayView version={version} go={() => setView("settings")} />}
+        {view === "evaluation" && <EvaluationView version={version} />}
+        {view === "settings" && <SettingsView onSaved={reload} />}
       </main>
     </div>
   );

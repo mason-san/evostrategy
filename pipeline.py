@@ -4,7 +4,7 @@ Command line
     python pipeline.py demo                 # build demo data, reset, ingest and reconcile it
     python pipeline.py run <files/folders>  # ingest files/folders, then reconcile everything
     python pipeline.py reconcile            # re-run reconciliation over stored documents
-    python pipeline.py reset                # delete the local registry
+    python pipeline.py reset                # start a fresh registry (old one is backed up)
     python pipeline.py status               # print the latest run summary
 """
 
@@ -82,12 +82,18 @@ def run_reconciliation(db_path: Path = REGISTRY_DB) -> dict:
     return result.summary
 
 
+DEMO_FINANCE = {"cash_balance": 750000.0, "cash_as_of": None, "headcount": 15,
+                "source": "demo company assumption (not from a document)"}
+
+
 def run_demo(db_path: Path = REGISTRY_DB, progress: ProgressCallback | None = None) -> dict:
     """Rebuild the demo dataset and run it end to end on a fresh registry."""
     from scripts.make_demo_data import main as build_demo
 
     build_demo()
     registry.reset_registry(db_path)
+    # The demo company's opening position: documents cannot tell us cash on hand.
+    registry.set_setting("finance", DEMO_FINANCE, db_path)
     _, failures = ingest_paths([DEMO_DATA_DIR], db_path=db_path, progress=progress)
     summary = run_reconciliation(db_path)
     return {**summary, "failures": failures}
@@ -134,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("paths", nargs="+")
     sub.add_parser("reconcile", help="re-run reconciliation over stored documents")
     sub.add_parser("demo", help="load the bundled demo dataset end to end")
-    sub.add_parser("reset", help="delete the local registry")
+    sub.add_parser("reset", help="start a fresh registry (the old one is moved to backups/)")
     sub.add_parser("status", help="show the latest run summary")
     args = parser.parse_args(argv)
 
@@ -146,8 +152,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "demo":
         summary = run_demo(progress=_print_progress)
     elif args.command == "reset":
-        registry.reset_registry()
-        summary = {"reset": str(REGISTRY_DB)}
+        backup = registry.reset_registry()
+        summary = {"reset": str(REGISTRY_DB), "previous_registry_backed_up_to": str(backup) if backup else None}
     else:
         summary = registry.get_last_run() or {"message": "No runs yet."}
     print(json.dumps(summary, indent=2))

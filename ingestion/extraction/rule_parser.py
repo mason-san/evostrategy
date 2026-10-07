@@ -29,6 +29,28 @@ _LABEL_WORD = re.compile(r"^[A-Z#][\w#().%/-]*$")
 
 KNOWN_LABEL_CONFIDENCE = 0.95
 HEURISTIC_LABEL_CONFIDENCE = 0.80
+# A known label found at the start of a line whose colon OCR lost ("Date Dec 08 2012").
+NO_COLON_LABEL_CONFIDENCE = 0.85
+
+# OCR look-alikes inside label words (only used to *recognise* a label;
+# the label is still emitted exactly as printed).
+_LABEL_FOLD = str.maketrans({"1": "i", "!": "i", "|": "i", "l": "i", "0": "o"})
+
+
+def _known_without_colon(line: str) -> tuple[str, str] | None:
+    """Split "Order 1D - MX-2012-..." into (label, value) when the label is known."""
+    words = line.split()
+    for size in (3, 2, 1):
+        if len(words) <= size:
+            continue
+        candidate = " ".join(words[:size])
+        folded = candidate.casefold().translate(_LABEL_FOLD).strip(";|>.-")
+        known = {label.translate(_LABEL_FOLD) for label in _KNOWN_LABELS}
+        if folded in known:
+            value = " ".join(words[size:]).lstrip(";|>.-: ").strip()
+            if value and not value.casefold().translate(_LABEL_FOLD) in known:
+                return candidate.strip(";|>.-"), value
+    return None
 
 
 def _tail_label(segment: str) -> tuple[str, str, bool]:
@@ -84,6 +106,10 @@ def parse_document_rules(text: str) -> dict[str, Any]:
             add("#", hash_match.group(1), True)
             continue
         if ":" not in line:
+            found = _known_without_colon(line)
+            if found:
+                fields.append({"field_id": f"field-{len(fields) + 1}", "label": found[0],
+                               "value": found[1], "confidence": NO_COLON_LABEL_CONFIDENCE})
             continue
         segments = re.split(r"\s*:\s*", line)
         _, label, known = _tail_label(segments[0])

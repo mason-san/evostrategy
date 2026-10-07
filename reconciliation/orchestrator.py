@@ -23,6 +23,7 @@ from ingestion.schemas.contracts import SourceDocument
 from reconciliation.comparator import compare_numeric
 from reconciliation.document_linking import LinkStatus, evaluate_link
 from reconciliation.entity_resolution import ResolutionStatus, resolve_normalized_entities
+from reconciliation.normalization import identifier_match_key
 from reconciliation.normalization import NormalizedDocument, normalize_document
 from reconciliation.semantic_mapping import (
     DocumentType,
@@ -31,7 +32,7 @@ from reconciliation.semantic_mapping import (
     map_document,
     normalize_label,
 )
-from utils.config import DATE_TOLERANCE_DAYS, LOW_CONFIDENCE_THRESHOLD
+from utils.config import DATE_TOLERANCE_DAYS, KEY_FIELD_REVIEW_THRESHOLD, LOW_CONFIDENCE_THRESHOLD
 
 OPEN_STATUSES = {"ESCALATED", "MISSING", "AMBIGUOUS"}
 _SEVERITY = {"MATCHED": 0, "AUTO_RESOLVED": 1, "AMBIGUOUS": 2, "MISSING": 3, "ESCALATED": 4}
@@ -76,6 +77,7 @@ class DocumentFacts:
     entry_type: str | None = None
     extraction_confidence: float = 1.0
     low_confidence: bool = False
+    weak_fields: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -154,7 +156,29 @@ def _facts(source: SourceDocument, normalized: NormalizedDocument) -> DocumentFa
             break
     if by_role.get(SemanticRole.CURRENCY):
         facts.currency = facts.currency or str(by_role[SemanticRole.CURRENCY][0].normalized_value)
+    _flag_weak_key_fields(source, facts)
     return facts
+
+
+def _flag_weak_key_fields(source: SourceDocument, facts: DocumentFacts) -> None:
+    """Low-confidence review is decided on the fields reconciliation relies on.
+
+    Stage 1 scores every field; a badly read layout line ("Ship To: ; ;") should
+    not send an otherwise clear invoice to review, but a doubtful amount, date or
+    identifier must. Documents without per-field scores keep Stage 1's flag.
+    """
+    confidence = {f.field_id: f.confidence for f in source.fields}
+    key_ids = [ref["field_id"] for ref in (facts.amount_field, facts.date_field) if ref]
+    key_ids += list(facts.identifiers.values())
+    labels = {f.field_id: f.label for f in source.fields}
+    scored = [(fid, confidence.get(fid)) for fid in key_ids if confidence.get(fid) is not None]
+    if not scored:
+        return
+    facts.weak_fields = [
+        {"field_id": fid, "label": labels.get(fid), "confidence": value}
+        for fid, value in scored if value < KEY_FIELD_REVIEW_THRESHOLD
+    ]
+    facts.low_confidence = bool(facts.weak_fields)
 
 
 # --------------------------------------------------------------------------- comparisons
@@ -273,6 +297,111 @@ def _transaction(group: list[DocumentFacts], case_ids: list[str]) -> dict[str, A
     }
 
 
+REFERENCE_FREE_AMOUNT_WINDOW = 0.25  # candidate window only; the 2% tolerance still decides
+
+
+def _reference_free_ledger_links(
+    facts: dict[str, DocumentFacts],
+    pairs: list[tuple[str, str, str]],
+    cases: list[dict[str, Any]],
+) -> list[tuple[str, str, dict[str, Any]]]:
+    """Link invoices to ledger postings that were booked without the invoice reference.
+
+    A link is made only when exactly one unreferenced revenue posting lies within
+    the date tolerance and a broad amount window of the invoice, and that
+    posting has no other such invoice. The normal comparison then decides
+    whether the amounts and dates agree, so a wrong-amount posting is still
+    escalated. Everything else stays unlinked and is reported as missing.
+    """
+    paired = {doc_id for left_id, right_id, _ in pairs for doc_id in (left_id, right_id)
+              if DocumentType.LEDGER in (facts[left_id].document_type, facts[right_id].document_type)}
+    contested = {doc_id for case in cases if case.get("case_type") == "ambiguous_link" for doc_id in case["document_ids"]}
+    invoices = [f for f in facts.values() if f.document_type == DocumentType.INVOICE
+                and f.document_id not in paired and f.document_id not in contested
+                and f.amount is not None and f.date is not None]
+    postings = [f for f in facts.values() if f.document_type == DocumentType.LEDGER and not f.identifiers
+                and f.document_id not in paired and f.amount is not None and f.date is not None
+                and _kind([f]) == "revenue"]
+
+    def close(invoice: DocumentFacts, posting: DocumentFacts) -> bool:
+        days = _days_between(invoice.date, posting.date)
+        baseline = max(abs(invoice.amount), 1.0)
+        return (days is not None and abs(days) <= DATE_TOLERANCE_DAYS
+                and abs(invoice.amount - posting.amount) / baseline <= REFERENCE_FREE_AMOUNT_WINDOW)
+
+    candidates = {inv.document_id: [p.document_id for p in postings if close(inv, p)] for inv in invoices}
+    claimed: dict[str, int] = {}
+    for found in candidates.values():
+        for posting_id in found:
+            claimed[posting_id] = claimed.get(posting_id, 0) + 1
+    links = []
+    for invoice_id, found in candidates.items():
+        if len(found) == 1 and claimed[found[0]] == 1:
+            left_id, right_id = sorted((invoice_id, found[0]))
+            links.append((left_id, right_id, {
+                "link_id": f"{left_id}|{right_id}", "left_document_id": left_id,
+                "right_document_id": right_id, "relationship": "INVOICE_LEDGER",
+                "status": "LINKED", "linked": True, "confidence": 0.55,
+                "evidence": {"method": "unique_amount_date_match", "shared_identifiers": [],
+                             "note": "Ledger posting has no invoice reference; matched on amount and date."},
+            }))
+    return links
+
+
+def _fold_duplicate_symptoms(
+    cases: list[dict[str, Any]],
+    pairs: list[tuple[str, str, str]],
+    facts: dict[str, DocumentFacts],
+) -> list[dict[str, Any]]:
+    """Merge "ledger vs duplicate copy" mismatches into the duplicate case.
+
+    When two invoices share an identifier and the ledger agrees with one of
+    them, the ledger necessarily disagrees with the other. That second mismatch
+    is a symptom of the duplicate, not a separate problem, so instead of asking
+    the reviewer twice it is attached to the (still escalated) duplicate case as
+    evidence. Nothing is hidden: the duplicate case stays open and the
+    transaction stays out of analytics until a reviewer decides.
+    """
+    by_id = {case["case_id"]: case for case in cases}
+
+    def pair_case(a: str, b: str) -> dict[str, Any] | None:
+        left, right = sorted((a, b))
+        return by_id.get(f"pair:{left}|{right}")
+
+    partners: dict[str, set[str]] = {}
+    for left_id, right_id, relationship in pairs:
+        if relationship != "DUPLICATE":
+            partners.setdefault(left_id, set()).add(right_id)
+            partners.setdefault(right_id, set()).add(left_id)
+
+    folded: set[str] = set()
+    for left_id, right_id, relationship in pairs:
+        if relationship != "DUPLICATE":
+            continue
+        duplicate = pair_case(left_id, right_id)
+        if duplicate is None:
+            continue
+        for other in partners.get(left_id, set()) & partners.get(right_id, set()):
+            first, second = pair_case(other, left_id), pair_case(other, right_id)
+            if not first or not second:
+                continue
+            for agrees, disagrees, copy_id in ((first, second, right_id), (second, first, left_id)):
+                if agrees["status"] in {"MATCHED", "AUTO_RESOLVED"} and disagrees["status"] == "ESCALATED":
+                    folded.add(disagrees["case_id"])
+                    duplicate.setdefault("related_evidence", []).append({
+                        "folded_case_id": disagrees["case_id"],
+                        "document_ids": disagrees["document_ids"],
+                        "results": disagrees["results"],
+                        "explanation": disagrees["explanation"],
+                    })
+                    duplicate["explanation"] += (
+                        f" The {facts[other].document_type.value.lower()} entry agrees with "
+                        f"{facts[left_id if copy_id == right_id else right_id].source_name}; "
+                        f"{facts[copy_id].source_name} differs ({disagrees['explanation']})"
+                    )
+    return [case for case in cases if case["case_id"] not in folded]
+
+
 # --------------------------------------------------------------------------- run
 
 def reconcile_documents(
@@ -301,7 +430,9 @@ def reconcile_documents(
         for right_id in ids[index + 1:]:
             left, right = facts[left_id], facts[right_id]
             if left.document_type == right.document_type:
-                shared = set(left.identifiers) & set(right.identifiers)
+                left_keys = {identifier_match_key(value): value for value in left.identifiers}
+                shared = {left_keys[identifier_match_key(value)] for value in right.identifiers
+                          if identifier_match_key(value) in left_keys}
                 if shared and left.document_type != DocumentType.UNKNOWN:
                     union.union(left_id, right_id)
                     pairs.append((left_id, right_id, "DUPLICATE"))
@@ -337,6 +468,12 @@ def reconcile_documents(
                     "explanation": "These documents partly agree but the evidence is not strong enough to link them automatically.",
                 })
 
+    # 1b. ledger postings that carry no reference: link only on a unique amount + date match
+    for left_id, right_id, link in _reference_free_ledger_links(facts, pairs, cases):
+        union.union(left_id, right_id)
+        pairs.append((left_id, right_id, "INVOICE_LEDGER"))
+        links.append(link)
+
     # 2. field comparisons for linked pairs and duplicates
     for left_id, right_id, relationship in pairs:
         results = _compare_pair(facts[left_id], facts[right_id])
@@ -362,6 +499,8 @@ def reconcile_documents(
             "explanation": explanation,
         })
 
+    cases = _fold_duplicate_symptoms(cases, pairs, facts)
+
     # 3. per-document checks: extraction confidence, missing counterparts
     linked_ids = {doc_id for left_id, right_id, _ in pairs for doc_id in (left_id, right_id)}
     ledger_linked = {
@@ -371,8 +510,19 @@ def reconcile_documents(
         for doc_id in (left_id, right_id)
     }
     has_ledger = any(f.document_type == DocumentType.LEDGER for f in facts.values())
+    duplicate_partners: dict[str, set[str]] = {}
+    for left_id, right_id, relationship in pairs:
+        if relationship == "DUPLICATE":
+            duplicate_partners.setdefault(left_id, set()).add(right_id)
+            duplicate_partners.setdefault(right_id, set()).add(left_id)
     for doc_id in ids:
-        if has_ledger and facts[doc_id].document_type == DocumentType.INVOICE and doc_id not in ledger_linked:
+        booked_copy = duplicate_partners.get(doc_id, set()) & ledger_linked
+        if has_ledger and facts[doc_id].document_type == DocumentType.INVOICE and doc_id not in ledger_linked and booked_copy:
+            # the duplicate case already asks the reviewer about this copy
+            duplicate = next((c for c in cases if c["case_type"] == "duplicate_entry" and doc_id in c["document_ids"]), None)
+            if duplicate is not None:
+                duplicate["explanation"] += f" Only {facts[sorted(booked_copy)[0]].source_name} is booked in the ledger."
+        elif has_ledger and facts[doc_id].document_type == DocumentType.INVOICE and doc_id not in ledger_linked:
             cases.append({
                 "case_id": f"doc:{doc_id}:missing-ledger",
                 "case_type": "missing_document",
@@ -385,10 +535,15 @@ def reconcile_documents(
         doc = facts[doc_id]
         missing = [name for name, value in (("amount", doc.amount), ("date", doc.date)) if value is None]
         if doc.document_type != DocumentType.UNKNOWN and (doc.low_confidence or missing):
-            reason = (
-                f"Extraction confidence {doc.extraction_confidence:.1%} is below the "
-                f"{LOW_CONFIDENCE_THRESHOLD:.0%} review threshold." if doc.low_confidence else ""
-            )
+            if doc.low_confidence and doc.weak_fields:
+                reason = "Read with low OCR confidence: " + ", ".join(
+                    f"{w['label']} ({w['confidence']:.0%})" for w in doc.weak_fields
+                ) + f" — below the {KEY_FIELD_REVIEW_THRESHOLD:.0%} key-field review threshold."
+            elif doc.low_confidence:
+                reason = (f"Extraction confidence {doc.extraction_confidence:.1%} is below the "
+                          f"{LOW_CONFIDENCE_THRESHOLD:.0%} review threshold.")
+            else:
+                reason = ""
             if missing:
                 reason = (reason + " " if reason else "") + f"Could not read: {', '.join(missing)}."
             cases.append({

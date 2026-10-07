@@ -286,7 +286,12 @@ def normalize_label(label: str | None) -> str:
     """Normalize a label for matching without changing the source label."""
     if not label:
         return ""
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", label.casefold())).strip()
+    text = label.casefold()
+    # OCR look-alikes next to letters ("Order 1D", "T0tal"): fold to the letter.
+    # Digits next to digits ("Discount (20%)") are left alone.
+    text = re.sub(r"[1!|](?=[a-z])|(?<=[a-z])[!|]", "i", text)
+    text = re.sub(r"(?<=[a-z])0|0(?=[a-z])", "o", text)
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", text)).strip()
 
 
 def _tokens(text: str) -> set[str]:

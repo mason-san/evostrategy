@@ -31,7 +31,7 @@ class EntityResolutionTests(unittest.TestCase):
         result = resolve_entities("Global Technology Solutions", "Global Technology Solution")
         self.assertTrue(result.resolved)
         self.assertEqual(result.method, ResolutionMethod.FUZZY)
-        self.assertGreaterEqual(result.score, 0.85)
+        self.assertGreaterEqual(result.score, 0.90)
 
     def test_different_entities_are_unresolved(self) -> None:
         result = resolve_entities("ABC Technologies", "XYZ Technologies")
@@ -67,9 +67,20 @@ class EntityResolutionTests(unittest.TestCase):
         strict = resolve_normalized_entities(
             "acme technology services",
             "acme technology service",
-            config=ResolutionConfig(resolved_threshold=0.99, ambiguous_threshold=0.70),
+            config=ResolutionConfig(resolved_threshold=0.995, ambiguous_threshold=0.70),
         )
         self.assertNotEqual(default.resolved, strict.resolved)
+
+    def test_jaro_winkler_threshold_is_the_plan_default(self) -> None:
+        self.assertEqual(ResolutionConfig().resolved_threshold, 0.90)
+
+    def test_extra_words_keep_high_jaro_winkler_pairs_ambiguous(self) -> None:
+        result = resolve_entities("Amazon Web Services", "Amazon Web Services India Pvt Ltd")
+        self.assertEqual(result.status, ResolutionStatus.AMBIGUOUS)
+
+    def test_token_order_does_not_matter(self) -> None:
+        result = resolve_entities("Solutions Global Technology", "Global Technology Solutions")
+        self.assertTrue(result.resolved)
 
     def test_customer_type_is_supported(self) -> None:
         result = resolve_entities(

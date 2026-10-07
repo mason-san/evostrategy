@@ -18,6 +18,13 @@ DATE_TOLERANCE_DAYS = 7
 
 # Stage 1 confidence gate: extractions below this are escalated for review.
 LOW_CONFIDENCE_THRESHOLD = 0.85
+# Per-field gate for the fields reconciliation relies on (amount, date, reference).
+# Tuned with scripts/calibrate_confidence.py (plan week 10): Tesseract word
+# confidence is noisy for long codes, and 0.85 sent 31% of *correct* key fields
+# to review while 0.60 caught the same wrong values with 8.7% false alarms.
+# The sample of wrong values was small (2 of 94), so re-run the calibration on
+# real documents before relying on this number.
+KEY_FIELD_REVIEW_THRESHOLD = 0.60
 
 # Stage 4 forecasting
 FORECAST_CONFIDENCE_LEVEL = 0.85

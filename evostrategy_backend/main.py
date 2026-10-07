@@ -3,7 +3,10 @@
 Ingestion jobs   POST /api/ingestion/jobs, GET /api/ingestion/jobs/{id}, POST /api/demo
 Workspace        GET  /api/summary, /api/documents, /api/documents/{id}, page images
 Verification     GET  /api/cases, /api/cases/{id}; POST /api/cases/{id}/review; GET /api/audit
-Analytics        GET  /api/analytics/overview, /api/forecast; POST /api/whatif
+Analytics        GET  /api/analytics/overview, /api/forecast, /api/forecast/snapshots,
+                      /api/runway; POST /api/whatif
+Settings         GET/PUT /api/settings (budgets, cash balance, headcount)
+Evaluation       GET  /api/metrics, /api/audit/verify
 Admin            POST /api/reconcile, POST /api/reset
 
 When evostrategy_frontend/dist exists it is served at "/", so a single
@@ -27,14 +30,15 @@ from analytics.forecasting import forecast_series
 from analytics.verified import load_transactions, verified_transactions
 from analytics.whatif import Scenario, simulate
 from analytics.aggregates import monthly_series
+from analytics.finance import data_sources, runway
 from ingestion.service import SUPPORTED_TYPES
 from storage import registry
-from utils.config import DEFAULT_FORECAST_HORIZON, PROJECT_ROOT, UPLOAD_DIR
+from utils.config import DEFAULT_FORECAST_HORIZON, DEMO_DATA_DIR, PROJECT_ROOT, UPLOAD_DIR
 
 from . import workspace
 from .ingestion_service import initial_steps, process_demo_job, process_job
 from .job_store import JobStore
-from .models import IngestionJob, ReviewRequest, ScenarioRequest
+from .models import IngestionJob, ReviewRequest, ScenarioRequest, SettingsRequest
 
 FRONTEND_DIST = PROJECT_ROOT / "evostrategy_frontend" / "dist"
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -211,9 +215,30 @@ def get_audit(limit: int = Query(default=200, ge=1, le=2000)) -> list[dict]:
 
 # --------------------------------------------------------------------------- analytics
 
+def _budgets() -> dict[str, float] | None:
+    return registry.get_setting("budgets") or None
+
+
+def _finance() -> dict:
+    return registry.get_setting("finance") or {}
+
+
+def _traceability(verified: list[dict]) -> dict:
+    dates = sorted(t["date"] for t in verified if t.get("date"))
+    return {
+        "verified_records": len(verified),
+        "date_from": dates[0] if dates else None,
+        "date_to": dates[-1] if dates else None,
+        "data_source": data_sources(verified, registry.get_documents(), str(DEMO_DATA_DIR)),
+    }
+
+
 @app.get("/api/analytics/overview")
 def get_overview() -> dict:
-    return overview(load_transactions(), verified_transactions())
+    verified = verified_transactions()
+    result = overview(load_transactions(), verified, _budgets())
+    result["traceability"]["data_source"] = _traceability(verified)["data_source"]
+    return result
 
 
 @app.get("/api/forecast")
@@ -221,15 +246,91 @@ def get_forecast(
     metric: str = Query(default="revenue", pattern="^(revenue|expense|profit)$"),
     horizon: int = Query(default=DEFAULT_FORECAST_HORIZON, ge=1, le=24),
 ) -> dict:
-    series = monthly_series(verified_transactions())
+    """Forecast one verified monthly series; every distinct result is snapshotted."""
+    import hashlib
+    import json
+
+    verified = verified_transactions()
+    series = monthly_series(verified)
     if not series["months"]:
         return {"error": "No verified data yet.", "metric": metric}
-    return {"metric": metric, **forecast_series(series["months"], series[metric], horizon=horizon)}
+    result = {"metric": metric, **forecast_series(series["months"], series[metric], horizon=horizon,
+                                                  non_negative=metric != "profit")}
+    if "error" not in result:
+        result["traceability"] = _traceability(verified)
+        inputs = json.dumps({"months": series["months"], "values": series[metric]}, sort_keys=True)
+        input_hash = hashlib.sha256(inputs.encode()).hexdigest()[:16]
+        result["snapshot_id"] = registry.save_forecast_snapshot(metric, horizon, input_hash, {
+            "forecast_months": result["forecast_months"],
+            "ensemble": result["models"]["ensemble"],
+            "backtest": result["backtest"],
+            "rolling_backtest": result["rolling_backtest"],
+            "traceability": result["traceability"],
+        })
+        result["input_hash"] = input_hash
+    return result
+
+
+@app.get("/api/forecast/snapshots")
+def get_forecast_snapshots(limit: int = Query(default=20, ge=1, le=200)) -> list[dict]:
+    return registry.get_forecast_snapshots(limit)
+
+
+@app.get("/api/runway")
+def get_runway() -> dict:
+    verified = verified_transactions()
+    result = runway(verified, _finance())
+    if result.get("configured") and "error" not in result:
+        result["traceability"] = _traceability(verified)
+    return result
 
 
 @app.post("/api/whatif")
 def run_whatif(request: ScenarioRequest) -> dict:
-    return simulate(verified_transactions(), Scenario(**request.model_dump()))
+    return simulate(verified_transactions(), Scenario(**request.model_dump()),
+                    budgets=_budgets(), finance=_finance())
+
+
+@app.get("/api/settings")
+def get_settings() -> dict:
+    return {"budgets": registry.get_setting("budgets") or {}, "finance": _finance()}
+
+
+@app.put("/api/settings")
+def put_settings(request: SettingsRequest) -> dict:
+    if request.budgets is not None:
+        registry.set_setting("budgets", {k.strip(): v for k, v in request.budgets.items() if k.strip() and v > 0})
+    if request.finance is not None:
+        finance = request.finance.model_dump()
+        finance["source"] = "entered in Settings"
+        registry.set_setting("finance", finance)
+    return get_settings()
+
+
+@app.get("/api/metrics")
+def get_metrics() -> dict:
+    """Last full evaluation (scripts/evaluate_all.py) plus live review-efficiency."""
+    import json
+
+    from analytics.efficiency import review_efficiency
+    from ingestion.ocr import paddle_engine
+
+    path = PROJECT_ROOT / "evaluation_dataset" / "evaluation_results.json"
+    report = json.loads(path.read_text()) if path.is_file() else None
+    return {
+        "evaluation": report,
+        "evaluation_available": report is not None,
+        "how_to_refresh": "python scripts/evaluate_all.py",
+        "live_review_efficiency": review_efficiency(registry.get_cases(), registry.get_transactions()),
+        "audit_chain": registry.verify_audit_chain(),
+        "second_ocr_engine": paddle_engine.status(),
+    }
+
+
+@app.get("/api/audit/verify")
+def verify_audit() -> dict:
+    """Recompute the audit hash chain to show that no decision was altered."""
+    return registry.verify_audit_chain()
 
 
 # --------------------------------------------------------------------------- admin
@@ -243,8 +344,8 @@ def reconcile() -> dict:
 
 @app.post("/api/reset")
 def reset() -> dict:
-    registry.reset_registry()
-    return {"status": "reset"}
+    backup = registry.reset_registry()
+    return {"status": "reset", "backup": backup.name if backup else None}
 
 
 # --------------------------------------------------------------------------- frontend

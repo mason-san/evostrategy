@@ -48,14 +48,50 @@ def _payroll_profile(transactions: list[dict[str, Any]], months: list[str]) -> t
     return share, payroll / max(len(recent), 1)
 
 
-def simulate(transactions: list[dict[str, Any]], scenario: Scenario) -> dict[str, Any]:
+def annual_budget(transactions: list[dict[str, Any]], budgets: dict[str, float] | None) -> tuple[float | None, str]:
+    """Total yearly expense budget: configured, else last 12 months' spend + 5%."""
+    if budgets:
+        return round(sum(float(v) for v in budgets.values()), 2), "configured"
+    series = monthly_series(transactions)
+    if not series["months"]:
+        return None, "none"
+    last_year = series["expense"][-12:]
+    return round(sum(last_year) * 12 / len(last_year) * 1.05, 2), "last 12 months + 5%"
+
+
+def _cash_path(cash: float | None, profits: list[float]) -> dict[str, Any] | None:
+    """Ending cash and months until cash hits zero, for one profit path."""
+    if cash is None:
+        return None
+    balance, out_month = float(cash), None
+    for index, profit in enumerate(profits, start=1):
+        balance += profit
+        if out_month is None and balance <= 0:
+            out_month = index
+    average = sum(profits) / len(profits) if profits else 0.0
+    if out_month is None and average < 0:
+        out_month = round(len(profits) + balance / -average, 1)
+    return {"ending_cash": round(balance, 2), "runway_months": out_month, "burning_cash": average < 0}
+
+
+def simulate(
+    transactions: list[dict[str, Any]],
+    scenario: Scenario,
+    *,
+    budgets: dict[str, float] | None = None,
+    finance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     series = monthly_series(transactions)
     months = series["months"]
     if len(months) < 3:
         return {"error": "At least 3 months of verified data are needed for scenarios."}
     horizon = max(1, min(int(scenario.horizon), 24))
-    base_revenue = ensemble(linear_forecast(series["revenue"], horizon), arima_forecast(series["revenue"], horizon))["point"]
-    base_expense = ensemble(linear_forecast(series["expense"], horizon), arima_forecast(series["expense"], horizon))["point"]
+    def baseline(values: list[float]) -> list[float]:
+        # revenue and costs cannot go below zero, whatever the trend says
+        return [max(0.0, v) for v in ensemble(linear_forecast(values, horizon), arima_forecast(values, horizon))["point"]]
+
+    base_revenue = baseline(series["revenue"])
+    base_expense = baseline(series["expense"])
 
     payroll_share, monthly_payroll = _payroll_profile(transactions, months)
     cost_per_head = monthly_payroll / scenario.baseline_headcount if scenario.baseline_headcount else 0.0
@@ -88,6 +124,24 @@ def simulate(transactions: list[dict[str, Any]], scenario: Scenario) -> dict[str
     }
     totals["delta"] = {metric: round(totals["scenario"][metric] - totals["baseline"][metric], 2)
                        for metric in ("revenue", "expense", "profit")}
+
+    yearly, budget_source = annual_budget(transactions, budgets)
+    window_budget = round(yearly / 12 * horizon, 2) if yearly else None
+    budget = {
+        "annual_budget": yearly,
+        "budget_source": budget_source,
+        "window_budget": window_budget,
+        **{f"{kind}_consumption": round(totals[kind]["expense"] / window_budget, 4) if window_budget else None
+           for kind in ("baseline", "scenario")},
+    }
+    cash = (finance or {}).get("cash_balance")
+    cash = float(cash) if cash not in (None, "") else None
+    runway = {
+        "configured": cash is not None,
+        "starting_cash": cash,
+        "baseline": _cash_path(cash, [row["baseline"]["profit"] for row in rows]),
+        "scenario": _cash_path(cash, [row["scenario"]["profit"] for row in rows]),
+    }
     return {
         "scenario": asdict(scenario),
         "assumptions": {
@@ -99,4 +153,6 @@ def simulate(transactions: list[dict[str, Any]], scenario: Scenario) -> dict[str
         },
         "months": rows,
         "totals": totals,
+        "budget": budget,
+        "runway": runway,
     }

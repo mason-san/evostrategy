@@ -122,7 +122,8 @@ button.kpi { cursor: pointer; }
 .status-list li { align-items: center; display: flex; font-size: 13.5px; justify-content: space-between; }
 .status-list b { font: 600 13px "JetBrains Mono", monospace; }
 
-.trace { align-items: center; color: #777587; display: flex; font: 500 12px "JetBrains Mono", monospace; gap: 8px; margin: .2rem 0 0; }
+.trace { align-items: baseline; color: #777587; display: block; font: 500 12px "JetBrains Mono", monospace; line-height: 1.6; margin: .2rem 0 .8rem; }
+.trace-dot { margin-right: 8px; vertical-align: middle; }
 .trace-dot { background: #15803d; border-radius: 50%; display: inline-block; height: 7px; width: 7px; }
 
 /* tables */
@@ -242,3 +243,18 @@ label.inline { align-items: center; color: #464555; display: flex; font-size: 13
 
 /* Ready screen: keep the "Review anytime" badge clear of the metric label */
 .ready-metric.attention em { bottom: 8px; top: auto; }
+
+/* --- runway, settings, evaluation (phase 3) --- */
+.notice.ok { background: #effaf2; border-color: #cdebd6; color: #15803d; }
+.demo-badge { color: #b45309; font-weight: 500; }
+.form-stack { display: flex; flex-direction: column; gap: .7rem; }
+.form-stack label { color: #464555; display: flex; flex-direction: column; font-size: 13px; gap: 5px; }
+.form-stack input { border: 1px solid #dfe2f3; border-radius: 8px; font: inherit; padding: .55rem .7rem; }
+.form-stack input:focus { border-color: #4f46e5; outline: 2px solid rgba(79, 70, 229, .15); }
+.settings-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 1rem; grid-column: 1 / -1; }
+.big-number { font-size: 2.2rem; font-weight: 600; margin: .2rem 0 .6rem; }
+.big-number small { color: #777587; font-size: .95rem; font-weight: 400; }
+.kpi strong.pos, .kpi strong.neg { font-size: inherit; }
+code { background: #f1f1f8; border-radius: 5px; font-size: .9em; padding: .1rem .35rem; }
+.pos { color: #15803d; }
+.neg { color: #b42318; }

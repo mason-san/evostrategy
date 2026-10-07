@@ -54,11 +54,31 @@ def _provider() -> str:
     return provider
 
 
-def parse_document(text: str, ocr_confidence: float | None = None) -> tuple[dict[str, Any], str]:
+def _value_confidence(value: Any, words: dict[str, list[float]] | None) -> float | None:
+    """Mean Tesseract confidence of the words that make up one field value."""
+    if not words or value in (None, ""):
+        return None
+    scores = []
+    for token in str(value).split():
+        token = token.strip()
+        if token in words:
+            scores.append(sum(words[token]) / len(words[token]))
+    return sum(scores) / len(scores) if scores else None
+
+
+def parse_document(
+    text: str,
+    ocr_confidence: float | None = None,
+    *,
+    ocr_words: list[tuple[str, float]] | None = None,
+    second_opinion_text: str | None = None,
+) -> tuple[dict[str, Any], str]:
     """Return ``(extraction, method)`` with per-field confidence attached.
 
-    Field confidence = parser confidence (rules) or 1.0 (LLM), multiplied by the
-    OCR engine's document confidence when available.
+    Field confidence = parser confidence (rules) or 1.0 (LLM)
+    x OCR confidence of *that field's own words* (falls back to the page's mean
+    word confidence when the words cannot be located)
+    x a disagreement penalty when a second OCR engine read the value differently.
     """
     provider = _provider()
     method = provider
@@ -77,13 +97,25 @@ def parse_document(text: str, ocr_confidence: float | None = None) -> tuple[dict
         data = parse_document_rules(text)
         method = f"rules (fallback after {provider} error: {error})"
 
+    from ingestion.ocr.paddle_engine import DISAGREEMENT_PENALTY, agreement
+
+    word_index: dict[str, list[float]] = {}
+    for word, confidence in ocr_words or []:
+        word_index.setdefault(word, []).append(confidence)
+
     data.setdefault("fields", [])
     data.setdefault("tables", [])
     for index, field in enumerate(data["fields"]):
         field.setdefault("field_id", f"field-{index + 1}")
         base = field.get("confidence")
         base = float(base) if isinstance(base, (int, float)) else 1.0
-        if ocr_confidence is not None:
+        own = _value_confidence(field.get("value"), word_index)
+        if own is not None:
+            base *= own
+        elif ocr_confidence is not None:
             base *= ocr_confidence
+        agrees = agreement(field.get("value"), second_opinion_text)
+        if agrees is False:
+            base *= DISAGREEMENT_PENALTY
         field["confidence"] = round(max(0.0, min(base, 1.0)), 4)
     return data, method

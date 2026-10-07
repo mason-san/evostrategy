@@ -5,6 +5,8 @@ from pathlib import Path
 
 from utils.config import IMAGE_DIR
 
+RENDER_DPI = 300  # implementation plan: PyMuPDF rendering at 300 DPI
+
 
 def pdf_to_images(pdf_path: Path) -> list[Path]:
     """
@@ -29,7 +31,7 @@ def pdf_to_images(pdf_path: Path) -> list[Path]:
 
     for page_num in range(len(doc)):
         page = doc[page_num] #Each page
-        pix = page.get_pixmap(matrix=fitz.Matrix(3, 3)) #Convert the page into an image with a scaling factor of 3 for better resolution 
+        pix = page.get_pixmap(dpi=RENDER_DPI) #Render the page at 300 DPI (the plan's OCR resolution)
         output_file = output_dir / f"{Path(pdf_path).stem}_page_{page_num + 1}.png" #Define the output file path
         pix.save(output_file) #Just writing to disk. 
         image_paths.append(output_file) #Images are added to the image list.
