@@ -19,7 +19,8 @@ an existing registry is upgraded in place and no data is lost.
 import hashlib
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -28,11 +29,18 @@ from utils.config import REGISTRY_DB
 REVIEW_STATUS = {"ACCEPT": "ACCEPTED", "REJECT": "REJECTED", "CORRECT": "CORRECTED"}
 
 
-def _connect(db_path: Path) -> sqlite3.Connection:
+@contextmanager
+def _connect(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Commit (or roll back) and always close: sqlite3's own context manager
+    leaves the file open, which on Windows blocks moving it in reset_registry."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
-    return connection
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def init_registry(db_path: Path = REGISTRY_DB) -> None:

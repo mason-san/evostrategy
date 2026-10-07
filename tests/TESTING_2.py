@@ -127,8 +127,9 @@ class StorageAndUtilityTesting2(unittest.TestCase):
         upsert_cases([{**case, "status": "AUTO_RESOLVED"}], self.database)
 
         import sqlite3
+        from contextlib import closing
 
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection:
             row_count = connection.execute(
                 "SELECT COUNT(*) FROM reconciliation_cases"
             ).fetchone()[0]

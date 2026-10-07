@@ -4,6 +4,7 @@ what-if budget/runway impact, forecast snapshots, settings and the audit chain."
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -107,7 +108,7 @@ def test_audit_chain_detects_edits_and_deletions(db: Path) -> None:
         registry.log_review_action("c1", action, "ayushi", "checked", db_path=db)
     assert registry.verify_audit_chain(db)["intact"] is True
 
-    with sqlite3.connect(db) as connection:
+    with closing(sqlite3.connect(db)) as connection, connection:
         connection.execute("UPDATE review_actions SET reviewer='someone else' WHERE id=2")
     assert registry.verify_audit_chain(db)["intact"] is False
 
@@ -115,7 +116,7 @@ def test_audit_chain_detects_edits_and_deletions(db: Path) -> None:
     registry.upsert_cases([{"case_id": "c1", "transaction_id": "t1", "status": "ESCALATED"}], db)
     for action in ("ACCEPT", "REJECT", "ACCEPT"):
         registry.log_review_action("c1", action, "ayushi", "checked", db_path=db)
-    with sqlite3.connect(db) as connection:
+    with closing(sqlite3.connect(db)) as connection, connection:
         connection.execute("DELETE FROM review_actions WHERE id=2")
     assert registry.verify_audit_chain(db)["intact"] is False
 
