@@ -43,9 +43,14 @@ JSON and follows the same extraction contract as the Gemini parser.
 3. The existing PDF rasterization, OCR, extraction, and persistence functions
    run in a background task.
 4. Poll `GET /api/ingestion/jobs/{job_id}` for `progress`, `steps`, processed
-   file counts, and explicit failure messages.
+   file counts, timestamped `events`, and explicit failure messages.
 
 Only PDFs are currently passed into the existing pipeline. CSV, XLSX, and DOCX
 uploads are accepted by the upload boundary for future preprocessing adapters,
 but currently finish with an explicit unsupported-format error rather than a
 false success state.
+
+The current onboarding job performs document receipt, PDF rasterization, OCR,
+LLM extraction, Pydantic validation, and JSON persistence. Reconciliation is
+not run by this upload job; the API reports that honestly as the next stage
+instead of marking an unperformed reconciliation step complete.
