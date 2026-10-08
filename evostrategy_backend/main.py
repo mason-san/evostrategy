@@ -5,7 +5,8 @@ Workspace        GET  /api/summary, /api/documents, /api/documents/{id}, page im
 Verification     GET  /api/cases, /api/cases/{id}; POST /api/cases/{id}/review; GET /api/audit
 Analytics        GET  /api/analytics/overview, /api/forecast, /api/forecast/snapshots,
                       /api/runway; POST /api/whatif
-Assistant        GET  /api/assistant/status; POST /api/assistant/chat (Claude + verified-data tools)
+Assistant        GET  /api/assistant/status; POST /api/assistant/chat (verified-data tools, saved to a chat)
+                 GET/PATCH/DELETE /api/chats[/{id}]  (chat history, separate chats.db)
 Settings         GET/PUT /api/settings (budgets, cash balance, headcount)
 Evaluation       GET  /api/metrics, /api/audit/verify
 Admin            POST /api/reconcile, POST /api/reset
@@ -36,13 +37,13 @@ import anthropic
 
 from assistant import agent as assistant_agent
 from ingestion.service import SUPPORTED_TYPES
-from storage import registry
+from storage import chats, registry
 from utils.config import DEFAULT_FORECAST_HORIZON, DEMO_DATA_DIR, PROJECT_ROOT, UPLOAD_DIR
 
 from . import workspace
 from .ingestion_service import _PIPELINE_LOCK, initial_steps, process_demo_job, process_job
 from .job_store import JobStore
-from .models import AssistantRequest, IngestionJob, ReviewRequest, ScenarioRequest, SettingsRequest
+from .models import AssistantRequest, RenameRequest, IngestionJob, ReviewRequest, ScenarioRequest, SettingsRequest
 
 FRONTEND_DIST = PROJECT_ROOT / "evostrategy_frontend" / "dist"
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -315,31 +316,85 @@ def assistant_status() -> dict:
     return assistant_agent.status()
 
 
+def _assistant_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, assistant_agent.AssistantUnavailable):
+        return HTTPException(status_code=503, detail=f"The assistant is not configured. {exc}")
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, anthropic.AuthenticationError):
+        return HTTPException(status_code=502, detail="Anthropic rejected the API key. Check ANTHROPIC_API_KEY.")
+    if isinstance(exc, anthropic.RateLimitError):
+        return HTTPException(status_code=429, detail="Anthropic rate limit reached. Try again in a moment.")
+    if isinstance(exc, anthropic.APIConnectionError):
+        return HTTPException(status_code=503, detail="Could not reach the Anthropic API.")
+    if isinstance(exc, anthropic.APIStatusError):
+        if "credit balance" in str(exc.message).lower():
+            return HTTPException(status_code=402, detail="Your Anthropic account has no API credit left. Add credit under Plans & Billing in the Anthropic Console, then try again.")
+        return HTTPException(status_code=502, detail=f"Anthropic API error ({exc.status_code}): {exc.message}")
+    raise exc
+
+
 @app.post("/api/assistant/chat")
 def assistant_chat(request: AssistantRequest) -> dict:
-    """Answer a question with Claude, grounded in read-only tools over verified data."""
+    """Answer a question with the chosen model, grounded in read-only tools over verified data.
+
+    The exchange is saved to the conversation (a new one when no id is given), so
+    chats survive refreshes and restarts; failures are saved as error messages.
+    """
     if not verified_transactions():
         raise HTTPException(status_code=409, detail="No verified data yet. Load documents and finish reconciliation first.")
+    if request.conversation_id:
+        if chats.get(request.conversation_id) is None:
+            raise HTTPException(status_code=404, detail="Chat not found.")
+        conversation_id = request.conversation_id
+        history = chats.history(conversation_id)
+        if not history and not chats.get(conversation_id)["messages"]:
+            chats.rename(conversation_id, " ".join(request.question.split()))   # first question names the chat
+    else:
+        conversation_id = chats.create(" ".join(request.question.split()))["id"]
+        history = []
+    chats.add_message(conversation_id, "user", request.question)
     try:
-        return assistant_agent.answer(
-            request.question,
-            [turn.model_dump() for turn in request.history],
-            request.model,
-        )
-    except assistant_agent.AssistantUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"The assistant is not configured. {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except anthropic.AuthenticationError as exc:
-        raise HTTPException(status_code=502, detail="Anthropic rejected the API key. Check ANTHROPIC_API_KEY.") from exc
-    except anthropic.RateLimitError as exc:
-        raise HTTPException(status_code=429, detail="Anthropic rate limit reached. Try again in a moment.") from exc
-    except anthropic.APIConnectionError as exc:
-        raise HTTPException(status_code=503, detail="Could not reach the Anthropic API.") from exc
-    except anthropic.APIStatusError as exc:
-        if "credit balance" in str(exc.message).lower():
-            raise HTTPException(status_code=402, detail="Your Anthropic account has no API credit left. Add credit under Plans & Billing in the Anthropic Console, then try again.") from exc
-        raise HTTPException(status_code=502, detail=f"Anthropic API error ({exc.status_code}): {exc.message}") from exc
+        result = assistant_agent.answer(request.question, history, request.model)
+    except Exception as exc:
+        http_error = _assistant_error(exc)
+        chats.add_message(conversation_id, "assistant", error=str(http_error.detail))
+        raise HTTPException(status_code=http_error.status_code, detail=http_error.detail,
+                            headers={"X-Conversation-Id": conversation_id}) from exc
+    chats.add_message(conversation_id, "assistant", result["answer"], result=result)
+    return {**result, "conversation_id": conversation_id}
+
+
+@app.post("/api/chats", status_code=201)
+def create_chat() -> dict:
+    return chats.create()
+
+
+@app.get("/api/chats")
+def list_chats() -> list[dict]:
+    return chats.list_all()
+
+
+@app.get("/api/chats/{conversation_id}")
+def get_chat(conversation_id: str) -> dict:
+    conversation = chats.get(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Chat not found.")
+    return conversation
+
+
+@app.patch("/api/chats/{conversation_id}")
+def rename_chat(conversation_id: str, request: RenameRequest) -> dict:
+    if not chats.rename(conversation_id, request.title):
+        raise HTTPException(status_code=404, detail="Chat not found.")
+    return chats.get(conversation_id) or {}
+
+
+@app.delete("/api/chats/{conversation_id}")
+def delete_chat(conversation_id: str) -> dict:
+    if not chats.delete(conversation_id):
+        raise HTTPException(status_code=404, detail="Chat not found.")
+    return {"deleted": conversation_id}
 
 
 @app.get("/api/settings")

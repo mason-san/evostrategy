@@ -81,3 +81,8 @@ class AssistantRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     history: list[ChatTurn] = Field(default_factory=list, max_length=40)
     model: str | None = None
+    conversation_id: str | None = None   # omit to start a new saved chat
+
+
+class RenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)

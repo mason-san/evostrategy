@@ -229,7 +229,11 @@ export type AssistantAnswer = {
   evidence: { verified_records: number; total_records: number; verified_rate: number | null; date_from: string | null; date_to: string | null; data_source?: DataSource };
   usage: { input_tokens: number; output_tokens: number };
   request_id: string | null;
+  conversation_id?: string;
 };
+export type ChatSummary = { id: string; title: string; created_at: string; updated_at: string; message_count: number };
+export type StoredMessage = { id: number; role: "user" | "assistant"; text: string; error: string | null; result: AssistantAnswer | null; created_at: string };
+export type ChatDetail = Omit<ChatSummary, "message_count"> & { messages: StoredMessage[] };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
@@ -279,8 +283,12 @@ export const api = {
   saveSettings: (body: Partial<{ budgets: Record<string, number>; finance: Partial<FinanceSettings> }>) =>
     request<Settings>("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
   assistantStatus: () => request<AssistantStatus>("/api/assistant/status"),
-  ask: (question: string, history: ChatTurn[], model?: string) =>
-    request<AssistantAnswer>("/api/assistant/chat", json({ question, history, model })),
+  ask: (question: string, model: string | undefined, conversationId: string) =>
+    request<AssistantAnswer>("/api/assistant/chat", json({ question, model, conversation_id: conversationId })),
+  chats: () => request<ChatSummary[]>("/api/chats"),
+  chat: (conversationId: string) => request<ChatDetail>(`/api/chats/${id(conversationId)}`),
+  createChat: () => request<ChatSummary>("/api/chats", { method: "POST" }),
+  deleteChat: (conversationId: string) => request<{ deleted: string }>(`/api/chats/${id(conversationId)}`, { method: "DELETE" }),
   metrics: () => request<Metrics>("/api/metrics"),
   auditChain: () => request<AuditChain>("/api/audit/verify"),
 };

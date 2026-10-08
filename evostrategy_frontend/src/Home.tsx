@@ -1,11 +1,42 @@
 import { useEffect, useRef, useState } from "react";
 import { Loading, useLoad } from "./hooks";
-import { api, money, percent, type AssistantAnswer, type ChatTurn, type Summary } from "./api";
+import { api, money, percent, type AssistantAnswer, type ChatSummary, type Summary } from "./api";
 import { LineChart } from "./charts";
 
 type Message =
   | { id: number; role: "user"; text: string }
   | { id: number; role: "assistant"; text: string; result?: AssistantAnswer; error?: string };
+
+const TABS_KEY = "evostrategy.chat.tabs";
+const ACTIVE_KEY = "evostrategy.chat.active";
+const readStored = <T,>(key: string, fallback: T): T => {
+  try { const raw = window.localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
+};
+const writeStored = (key: string, value: unknown) => { try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ } };
+
+function when(value: string) {
+  const date = new Date(value);
+  const days = Math.floor((Date.now() - date.getTime()) / 86_400_000);
+  if (days < 1) return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return days < 7 ? `${days}d ago` : date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function HistoryList({ chats, activeId, onOpen, onDelete, limit }: {
+  chats: ChatSummary[]; activeId: string | null; onOpen: (id: string) => void; onDelete: (chat: ChatSummary) => void; limit?: number;
+}) {
+  const rows = chats.filter((c) => c.message_count > 0).slice(0, limit);
+  if (!rows.length) return <p className="history-empty">No saved chats yet. Ask a question and it will be kept here.</p>;
+  return (
+    <ul className="history-list">
+      {rows.map((c) => (
+        <li key={c.id} className={c.id === activeId ? "current" : ""}>
+          <button className="history-open" onClick={() => onOpen(c.id)}><strong>{c.title}</strong><span>{when(c.updated_at)} · {Math.ceil(c.message_count / 2)} {c.message_count <= 2 ? "question" : "questions"}</span></button>
+          <button className="history-delete" aria-label={`Delete chat ${c.title}`} onClick={() => onDelete(c)}>🗑</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 const SUGGESTIONS = [
   "What was our revenue last quarter?",
@@ -102,17 +133,50 @@ export function Home({ summary, reviewer, go }: { summary: Summary; reviewer: st
   const { data: overview, error } = useLoad(api.overview, [summary.last_run_at, summary.reviewed_cases]);
   const [model, setModel] = useState("");
   const [question, setQuestion] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [busy, setBusy] = useState(false);
-  const nextId = useRef(1);
-  const chatting = messages.length > 0;
-  const modelReady = !status || !!status.models.find((m) => m.id === model)?.available;
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [tabs, setTabs] = useState<string[]>(() => readStored<string[]>(TABS_KEY, []));
+  const [activeId, setActiveId] = useState<string | null>(() => readStored<string | null>(ACTIVE_KEY, null));
+  const [threads, setThreads] = useState<Record<string, Message[]>>({});
+  const [busy, setBusy] = useState<string[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [notice, setNotice] = useState("");
+  const tempId = useRef(-1);
   const threadEnd = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { input.current?.focus(); }, [chatting]);
+  const messages = activeId ? threads[activeId] ?? [] : [];
+  const chatting = activeId !== null;
+  const isBusy = activeId !== null && busy.includes(activeId);
+  const modelReady = !status || !!status.models.find((m) => m.id === model)?.available;
+  const titleOf = (id: string) => chats.find((c) => c.id === id)?.title ?? "Chat";
+
+  const refreshChats = () => api.chats().then(setChats).catch(() => undefined);
+  const toMessages = (stored: Awaited<ReturnType<typeof api.chat>>["messages"]): Message[] =>
+    stored.map((m) => m.role === "user"
+      ? { id: m.id, role: "user", text: m.text }
+      : { id: m.id, role: "assistant", text: m.text, result: m.result ?? undefined, error: m.error ?? undefined });
+
+  // load the saved list once, and drop tabs whose chat no longer exists
+  useEffect(() => {
+    api.chats().then((list) => {
+      setChats(list);
+      const ids = new Set(list.map((c) => c.id));
+      setTabs((current) => current.filter((id) => ids.has(id)));
+      setActiveId((current) => (current && ids.has(current) ? current : null));
+    }).catch(() => undefined);
+  }, []);
+  useEffect(() => { writeStored(TABS_KEY, tabs); }, [tabs]);
+  useEffect(() => { writeStored(ACTIVE_KEY, activeId); }, [activeId]);
+  // fetch a chat's saved messages the first time its tab is shown
+  useEffect(() => {
+    if (!activeId || threads[activeId]) return;
+    api.chat(activeId).then((chat) => setThreads((current) => ({ ...current, [activeId]: current[activeId] ?? toMessages(chat.messages) })))
+      .catch(() => { setNotice("That chat could not be loaded."); closeTab(activeId); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+  useEffect(() => { input.current?.focus(); }, [activeId]);
   useEffect(() => { if (status && !model) setModel(status.default_model); }, [status, model]);
-  useEffect(() => { threadEnd.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [messages, busy]);
+  useEffect(() => { threadEnd.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [messages.length, isBusy, activeId]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); input.current?.focus(); }
@@ -121,39 +185,71 @@ export function Home({ summary, reviewer, go }: { summary: Summary; reviewer: st
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const openChat = (id: string) => {
+    setTabs((current) => (current.includes(id) ? current : [...current, id]));
+    setActiveId(id);
+    setShowHistory(false);
+  };
+  const closeTab = (id: string) => {
+    setTabs((current) => current.filter((t) => t !== id));
+    setActiveId((current) => (current === id ? null : current));
+  };
+  const removeChat = (chat: ChatSummary) => {
+    if (!window.confirm(`Delete the chat "${chat.title}"? This cannot be undone.`)) return;
+    api.deleteChat(chat.id).then(() => {
+      closeTab(chat.id);
+      setThreads((current) => { const { [chat.id]: _gone, ...rest } = current; return rest; });
+      void refreshChats();
+    }).catch((e: Error) => setNotice(e.message));
+  };
+
   const ask = async (text: string) => {
     const q = text.trim();
-    if (!q || busy) return;
-    const history: ChatTurn[] = messages.filter((m) => !(m.role === "assistant" && m.error)).map((m) => ({ role: m.role, content: m.text }));
-    setMessages((current) => [...current, { id: nextId.current++, role: "user", text: q }]);
-    setQuestion("");
-    setBusy(true);
+    if (!q || (activeId && busy.includes(activeId))) return;
+    setNotice("");
+    let id = activeId;
     try {
-      const result = await api.ask(q, history, model || undefined);
-      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: result.answer, result }]);
+      if (!id) {
+        id = (await api.createChat()).id;
+        setThreads((current) => ({ ...current, [id!]: [] }));
+        openChat(id);
+      }
     } catch (e) {
-      setMessages((current) => [...current, { id: nextId.current++, role: "assistant", text: "", error: e instanceof Error ? e.message : "The assistant could not answer." }]);
+      setNotice(e instanceof Error ? e.message : "Could not start a chat.");
+      return;
+    }
+    const chatId = id;
+    const add = (message: Message) => setThreads((current) => ({ ...current, [chatId]: [...(current[chatId] ?? []), message] }));
+    add({ id: tempId.current--, role: "user", text: q });
+    setQuestion("");
+    setBusy((current) => [...current, chatId]);
+    try {
+      const result = await api.ask(q, model || undefined, chatId);
+      add({ id: tempId.current--, role: "assistant", text: result.answer, result });
+    } catch (e) {
+      add({ id: tempId.current--, role: "assistant", text: "", error: e instanceof Error ? e.message : "The assistant could not answer." });
     } finally {
-      setBusy(false);
+      setBusy((current) => current.filter((b) => b !== chatId));
+      void refreshChats();
       input.current?.focus();
     }
   };
 
   const askForm = (
     <form className="ask-box" onSubmit={(e) => { e.preventDefault(); void ask(question); }}>
-        <input
-          ref={input} value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={2000}
-          placeholder="Ask anything about your verified data…" aria-label="Ask EvoAssistant" disabled={!modelReady}
-        />
-        <div className="ask-row">
-          <span className="source-chip">▤ Verified records only</span>
-          <kbd>⌘K</kbd>
-          <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model" disabled={!status}>
-            {status?.models.map((m) => <option key={m.id} value={m.id} disabled={!m.available}>{m.label} — {m.available ? m.note : "needs API key"}</option>)}
-          </select>
-          <button type="submit" className="send-button" disabled={busy || !question.trim() || !modelReady} aria-label="Ask">↑</button>
-        </div>
-      </form>
+      <input
+        ref={input} value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={2000}
+        placeholder="Ask anything about your verified data…" aria-label="Ask EvoAssistant" disabled={!modelReady}
+      />
+      <div className="ask-row">
+        <span className="source-chip">▤ Verified records only</span>
+        <kbd>⌘K</kbd>
+        <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model" disabled={!status}>
+          {status?.models.map((m) => <option key={m.id} value={m.id} disabled={!m.available}>{m.label} — {m.available ? m.note : "needs API key"}</option>)}
+        </select>
+        <button type="submit" className="send-button" disabled={isBusy || !question.trim() || !modelReady} aria-label="Ask">↑</button>
+      </div>
+    </form>
   );
 
   const quarters = overview?.quarterly;
@@ -170,19 +266,40 @@ export function Home({ summary, reviewer, go }: { summary: Summary; reviewer: st
     { label: "Test a pricing or hiring decision", hint: "Simulate it on the verified baseline", view: "whatif" as const, tone: "info" },
   ].filter(Boolean) as Array<{ label: string; hint: string; view: "review" | "forecast" | "whatif"; tone: string }>;
 
+  const tabBar = (tabs.length > 0 || chatting) && (
+    <div className="chat-tabs" role="tablist">
+      <button role="tab" aria-selected={!chatting} className={`chat-tab home-tab${!chatting ? " active" : ""}`} onClick={() => setActiveId(null)}>⌂ Home</button>
+      {tabs.map((id) => (
+        <span key={id} role="tab" aria-selected={id === activeId} className={`chat-tab${id === activeId ? " active" : ""}`}>
+          <button className="tab-title" onClick={() => setActiveId(id)} title={titleOf(id)}>{busy.includes(id) && <i className="tab-busy" />}{titleOf(id)}</button>
+          <button className="tab-close" aria-label={`Close tab ${titleOf(id)}`} onClick={() => closeTab(id)}>×</button>
+        </span>
+      ))}
+      <button className="chat-tab new-tab" aria-label="New chat" onClick={() => setActiveId(null)}>+</button>
+      <span className="tabs-spacer" />
+      <div className="history-menu">
+        <button className="new-chat" aria-expanded={showHistory} onClick={() => setShowHistory((v) => !v)}>History</button>
+        {showHistory && (
+          <div className="history-pop">
+            <HistoryList chats={chats} activeId={activeId} onOpen={openChat} onDelete={removeChat} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   if (chatting) {
     return (
       <div className="chat-view">
-        <header className="chat-head">
-          <div><strong>EvoAssistant</strong><span className="mono-muted">Answers come only from verified records</span></div>
-          <button className="new-chat" onClick={() => { setMessages([]); setQuestion(""); }}>+ New chat</button>
-        </header>
+        {tabBar}
         <div className="chat-scroll" aria-live="polite">
           <div className="thread">
+            {notice && <div className="notice error">{notice}</div>}
+            {!threads[activeId!] && <div className="loading">Loading chat…</div>}
             {messages.map((m) => m.role === "user"
               ? <div className="user-bubble" key={m.id}><span>{m.text}</span><i>{(reviewer.trim()[0] ?? "Y").toUpperCase()}</i></div>
               : <AssistantMessage key={m.id} message={m} go={go} />)}
-            {busy && <div className="thinking"><span /><span /><span />Reading your verified data…</div>}
+            {isBusy && <div className="thinking"><span /><span /><span />Reading your verified data…</div>}
             <div ref={threadEnd} />
           </div>
         </div>
@@ -193,21 +310,29 @@ export function Home({ summary, reviewer, go }: { summary: Summary; reviewer: st
 
   return (
     <div className="home">
+      {tabBar}
       <h2 className="home-title">{greeting(reviewer)}</h2>
       <p className="home-sub">What would you like to understand about your business today?</p>
 
-      {!chatting && askForm}
+      {askForm}
+      {notice && <div className="notice error setup-notice">{notice}</div>}
 
       {status && !modelReady && model && (
         <div className="notice setup-notice">This model is not available. {status.setup_hint}</div>
       )}
 
-      {(
-        <div className="suggestions">
-          <span className="mono-muted">Suggestions:</span>
-          {SUGGESTIONS.map((s) => <button key={s} disabled={!modelReady} onClick={() => void ask(s)}>{s}</button>)}
-        </div>
+      <div className="suggestions">
+        <span className="mono-muted">Suggestions:</span>
+        {SUGGESTIONS.map((s) => <button key={s} disabled={!modelReady} onClick={() => void ask(s)}>{s}</button>)}
+      </div>
+
+      {chats.some((c) => c.message_count > 0) && (
+        <section className="recent-chats">
+          <h4>Recent chats</h4>
+          <HistoryList chats={chats} activeId={null} onOpen={openChat} onDelete={removeChat} limit={5} />
+        </section>
       )}
+
 
       <section className="glance">
         <header><h3>At a glance</h3><span className="mono-muted">verified data only</span></header>

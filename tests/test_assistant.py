@@ -111,3 +111,48 @@ def test_ollama_loop_uses_same_tools_and_reports_evidence():
     assert tool_msg["role"] == "tool" and tool_msg["tool_name"] == "get_time_series"
     assert sent[0]["tools"][0]["type"] == "function" and sent[0]["think"] is False
     assert out["usage"] == {"input_tokens": 220, "output_tokens": 18}
+
+
+def test_chat_history_persists_and_survives_registry_reset():
+    from storage import chats, registry
+
+    conversation = chats.create("What was our revenue last quarter? " * 5)
+    assert len(conversation["title"]) <= chats.TITLE_LENGTH
+    chats.add_message(conversation["id"], "user", "q1")
+    chats.add_message(conversation["id"], "assistant", "a1", result={"answer": "a1", "evidence": {"verified_records": 3}})
+    chats.add_message(conversation["id"], "user", "q2")
+    chats.add_message(conversation["id"], "assistant", error="boom")
+
+    registry.reset_registry()   # loading demo data / resetting must not touch chats
+
+    loaded = chats.get(conversation["id"])
+    assert [m["role"] for m in loaded["messages"]] == ["user", "assistant", "user", "assistant"]
+    assert loaded["messages"][1]["result"]["evidence"]["verified_records"] == 3
+    assert chats.history(conversation["id"]) == [
+        {"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1"}, {"role": "user", "content": "q2"}]
+    assert chats.list_all()[0]["message_count"] == 4
+    assert chats.rename(conversation["id"], "Revenue") and chats.get(conversation["id"])["title"] == "Revenue"
+    assert chats.delete(conversation["id"]) and chats.get(conversation["id"]) is None and not chats.delete("nope")
+
+
+def test_chat_endpoint_saves_exchange_and_failures(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from evostrategy_backend.main import app
+
+    run_demo()
+    client = TestClient(app)
+    monkeypatch.setattr(agent, "answer", lambda q, h, m: {"answer": f"echo {q} / history={len(h)}", "evidence": {}, "model": "x"})
+    first = client.post("/api/assistant/chat", json={"question": "hello"}).json()
+    second = client.post("/api/assistant/chat", json={"question": "again", "conversation_id": first["conversation_id"]}).json()
+    assert second["conversation_id"] == first["conversation_id"] and second["answer"].endswith("history=2")
+
+    def fail(*_):
+        raise agent.AssistantUnavailable("no key")
+    monkeypatch.setattr(agent, "answer", fail)
+    response = client.post("/api/assistant/chat", json={"question": "x", "conversation_id": first["conversation_id"]})
+    assert response.status_code == 503
+    saved = client.get(f"/api/chats/{first['conversation_id']}").json()
+    assert saved["messages"][-1]["error"] and len(saved["messages"]) == 6
+    assert client.post("/api/assistant/chat", json={"question": "x", "conversation_id": "missing"}).status_code == 404
+    assert client.delete(f"/api/chats/{first['conversation_id']}").status_code == 200
