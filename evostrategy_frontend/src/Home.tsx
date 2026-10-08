@@ -105,9 +105,11 @@ export function Home({ summary, reviewer, go }: { summary: Summary; reviewer: st
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
   const nextId = useRef(1);
+  const chatting = messages.length > 0;
   const threadEnd = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
 
+  useEffect(() => { input.current?.focus(); }, [chatting]);
   useEffect(() => { if (status && !model) setModel(status.default_model); }, [status, model]);
   useEffect(() => { threadEnd.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [messages, busy]);
   useEffect(() => {
@@ -136,6 +138,23 @@ export function Home({ summary, reviewer, go }: { summary: Summary; reviewer: st
     }
   };
 
+  const askForm = (
+    <form className="ask-box" onSubmit={(e) => { e.preventDefault(); void ask(question); }}>
+        <input
+          ref={input} value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={2000}
+          placeholder="Ask anything about your verified data…" aria-label="Ask EvoAssistant" disabled={status?.configured === false}
+        />
+        <div className="ask-row">
+          <span className="source-chip">▤ Verified records only</span>
+          <kbd>⌘K</kbd>
+          <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model" disabled={!status}>
+            {status?.models.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.note}</option>)}
+          </select>
+          <button type="submit" className="send-button" disabled={busy || !question.trim() || status?.configured === false} aria-label="Ask">↑</button>
+        </div>
+      </form>
+  );
+
   const quarters = overview?.quarterly;
   const done = quarters ? quarters.quarters.map((_, i) => i).filter((i) => quarters.complete[i]) : [];
   const latest = done[done.length - 1];
@@ -150,44 +169,44 @@ export function Home({ summary, reviewer, go }: { summary: Summary; reviewer: st
     { label: "Test a pricing or hiring decision", hint: "Simulate it on the verified baseline", view: "whatif" as const, tone: "info" },
   ].filter(Boolean) as Array<{ label: string; hint: string; view: "review" | "forecast" | "whatif"; tone: string }>;
 
+  if (chatting) {
+    return (
+      <div className="chat-view">
+        <header className="chat-head">
+          <div><strong>EvoAssistant</strong><span className="mono-muted">Answers come only from verified records</span></div>
+          <button className="new-chat" onClick={() => { setMessages([]); setQuestion(""); }}>+ New chat</button>
+        </header>
+        <div className="chat-scroll" aria-live="polite">
+          <div className="thread">
+            {messages.map((m) => m.role === "user"
+              ? <div className="user-bubble" key={m.id}><span>{m.text}</span><i>{(reviewer.trim()[0] ?? "Y").toUpperCase()}</i></div>
+              : <AssistantMessage key={m.id} message={m} go={go} />)}
+            {busy && <div className="thinking"><span /><span /><span />Reading your verified data…</div>}
+            <div ref={threadEnd} />
+          </div>
+        </div>
+        <div className="chat-input">{askForm}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="home">
       <h2 className="home-title">{greeting(reviewer)}</h2>
       <p className="home-sub">What would you like to understand about your business today?</p>
 
-      <form className="ask-box" onSubmit={(e) => { e.preventDefault(); void ask(question); }}>
-        <input
-          ref={input} value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={2000}
-          placeholder="Ask anything about your verified data…" aria-label="Ask EvoAssistant" disabled={status?.configured === false}
-        />
-        <div className="ask-row">
-          <span className="source-chip">▤ Verified records only</span>
-          <kbd>⌘K</kbd>
-          <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model" disabled={!status}>
-            {status?.models.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.note}</option>)}
-          </select>
-          <button type="submit" className="send-button" disabled={busy || !question.trim() || status?.configured === false} aria-label="Ask">↑</button>
-        </div>
-      </form>
+      {!chatting && askForm}
 
       {status && !status.configured && (
         <div className="notice setup-notice">The assistant needs an Anthropic API key. {status.setup_hint}</div>
       )}
 
-      {messages.length === 0 && (
+      {(
         <div className="suggestions">
           <span className="mono-muted">Suggestions:</span>
           {SUGGESTIONS.map((s) => <button key={s} disabled={status?.configured === false} onClick={() => void ask(s)}>{s}</button>)}
         </div>
       )}
-
-      <div className="thread" aria-live="polite">
-        {messages.map((m) => m.role === "user"
-          ? <div className="user-bubble" key={m.id}><span>{m.text}</span><i>{(reviewer.trim()[0] ?? "Y").toUpperCase()}</i></div>
-          : <AssistantMessage key={m.id} message={m} go={go} />)}
-        {busy && <div className="thinking"><span /><span /><span />Reading your verified data…</div>}
-        <div ref={threadEnd} />
-      </div>
 
       <section className="glance">
         <header><h3>At a glance</h3><span className="mono-muted">verified data only</span></header>

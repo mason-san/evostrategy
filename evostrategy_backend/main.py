@@ -337,6 +337,8 @@ def assistant_chat(request: AssistantRequest) -> dict:
     except anthropic.APIConnectionError as exc:
         raise HTTPException(status_code=503, detail="Could not reach the Anthropic API.") from exc
     except anthropic.APIStatusError as exc:
+        if "credit balance" in str(exc.message).lower():
+            raise HTTPException(status_code=402, detail="Your Anthropic account has no API credit left. Add credit under Plans & Billing in the Anthropic Console, then try again.") from exc
         raise HTTPException(status_code=502, detail=f"Anthropic API error ({exc.status_code}): {exc.message}") from exc
 
 
