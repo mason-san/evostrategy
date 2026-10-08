@@ -130,10 +130,6 @@ function IntelligencePanel() {
 }
 
 type UploadFile = { file: File; name: string; size: string; type: string };
-type PipelineStep = { key: string; label: string; detail: string; state: "pending" | "active" | "complete" | "failed" };
-type StreamEvent = { timestamp: string; message: string; level: "info" | "success" | "error" };
-type IngestionJob = { job_id: string; status: "queued" | "running" | "completed" | "failed"; progress: number; files_received: number; files_processed: number; steps: PipelineStep[]; message: string; events: StreamEvent[]; error?: string | null };
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
 
 function UploadScreen({ onBack, onNext, onDemo }: { onBack: () => void; onNext: (files: File[]) => Promise<void>; onDemo: () => Promise<void> }) {
   const [isDragging, setIsDragging] = useState(false);
@@ -245,7 +241,7 @@ function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: ()
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : "Unable to read ingestion progress.";
-          setJob({ job_id: jobId, status: "failed", progress: 0, files_received: 0, files_processed: 0, steps: [], message, events: [{ timestamp: new Date().toLocaleTimeString(), message, level: "error" }], error: message });
+          setJob({ job_id: jobId, status: "failed", progress: 0, files_received: 0, files_processed: 0, steps: [], message, error: message });
         }
       }
     };
@@ -297,14 +293,9 @@ function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: ()
           </div>
           <div className="synthesis-stream">
             <div className="stream-heading"><span><Icon name="terminal" size={15} /> LIVE SYNTHESIS<br />STREAM</span><span className="kernel-status">● Local processing state</span></div>
-            <div className="stream-events" aria-live="polite">
-              {(job?.events ?? []).slice(-4).map((event) => (
-                <div className={`stream-log stream-${event.level}`} key={`${event.timestamp}-${event.message}`}>
-                  <span>{event.timestamp}</span><b>{event.level === "error" ? "!" : event.level === "success" ? "✓" : "→"}</b> {event.message}
-                </div>
-              ))}
-              {!job?.events.length && <div className="stream-log"><span>—</span><b>↻</b> Waiting for ingestion service<span className="cursor-block" /></div>}
-            </div>
+            <div className="stream-log"><span>{job ? `${job.files_processed}/${job.files_received}` : "—"}</span><b>{isFailed ? "!" : "✓"}</b> {job?.message ?? "Waiting for ingestion service"}{!isComplete && !isFailed && <span className="cursor-block" />}</div>
+            <div className="stream-log"><span>STATUS</span><b>→</b> {isFailed ? job.error : isComplete ? "All documents processed" : "Processing uploaded documents"}{!isComplete && !isFailed && <span className="cursor-block" />}</div>
+            {(job?.log ?? []).slice(-5).map((line, index) => <div className="stream-log" key={`${index}-${line}`}><span>LOG</span><b>›</b> {line}</div>)}
             <div className="stream-divider" />
             <div className="stream-note"><Icon name="shield" size={14} /> Source traceability remains available for review</div>
           </div>
@@ -435,23 +426,14 @@ function ReadyScreen({ onEnter }: { onEnter: () => void }) {
 }
 
 export function App() {
-  const [screen, setScreen] = useState<"loading" | "welcome" | "upload" | "processing" | "ready" | "workspace">("loading");
+  const [screen, setScreen] = useState<"welcome" | "upload" | "processing" | "ready" | "workspace">("welcome");
   const [jobId, setJobId] = useState("");
-
-  useEffect(() => {
-    api.summary()
-      .then((summary) => setScreen(summary.has_data ? "workspace" : "welcome"))
-      .catch(() => setScreen("welcome"));
-  }, []);
 
   const startJob = (job: IngestionJob) => {
     setJobId(job.job_id);
     setScreen("processing");
   };
 
-  if (screen === "loading") {
-    return <main className="app-shell"><Brand /></main>;
-  }
   if (screen === "workspace") {
     return <Workspace onAddDocuments={() => setScreen("upload")} onLoadDemo={() => api.loadDemo().then(startJob)} />;
   }
@@ -488,7 +470,7 @@ export function App() {
         <button className="primary-button" onClick={() => setScreen("upload")}>
           Get started <Icon name="arrow" size={20} />
         </button>
-        <button className="later-button" onClick={() => setScreen("workspace")}>I’ll do this later</button>
+        <button className="later-button" onClick={() => setScreen("welcome")}>I’ll do this later</button>
       </div>
     </main>
   );
