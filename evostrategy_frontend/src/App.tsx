@@ -130,6 +130,10 @@ function IntelligencePanel() {
 }
 
 type UploadFile = { file: File; name: string; size: string; type: string };
+type PipelineStep = { key: string; label: string; detail: string; state: "pending" | "active" | "complete" | "failed" };
+type StreamEvent = { timestamp: string; message: string; level: "info" | "success" | "error" };
+type IngestionJob = { job_id: string; status: "queued" | "running" | "completed" | "failed"; progress: number; files_received: number; files_processed: number; steps: PipelineStep[]; message: string; events: StreamEvent[]; error?: string | null };
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
 
 function UploadScreen({ onBack, onNext, onDemo }: { onBack: () => void; onNext: (files: File[]) => Promise<void>; onDemo: () => Promise<void> }) {
   const [isDragging, setIsDragging] = useState(false);
@@ -220,11 +224,11 @@ function UploadScreen({ onBack, onNext, onDemo }: { onBack: () => void; onNext: 
 }
 
 const processingSteps = [
-  { label: "Documents received", detail: "Files available", state: "complete" },
-  { label: "Extracting business information", detail: "Source-faithful fields", state: "complete" },
-  { label: "Reconciling records", detail: "Reviewable comparisons", state: "complete" },
-  { label: "Building company intelligence", detail: "Preparing your workspace", state: "active" },
-  { label: "Preparing your workspace", detail: "Next", state: "pending" },
+  { label: "Documents received", detail: "Files saved for processing", state: "complete" },
+  { label: "Extracting business information", detail: "Rasterizing pages and running OCR", state: "active" },
+  { label: "Validating extracted data", detail: "Checking source-faithful fields", state: "pending" },
+  { label: "Persisting source records", detail: "Writing traceable JSON output", state: "pending" },
+  { label: "Preparing your workspace", detail: "Ready for the next stage", state: "pending" },
 ] as const;
 
 function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: () => void; onNext: () => void }) {
@@ -241,7 +245,7 @@ function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: ()
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : "Unable to read ingestion progress.";
-          setJob({ job_id: jobId, status: "failed", progress: 0, files_received: 0, files_processed: 0, steps: [], message, error: message });
+          setJob({ job_id: jobId, status: "failed", progress: 0, files_received: 0, files_processed: 0, steps: [], message, events: [{ timestamp: new Date().toLocaleTimeString(), message, level: "error" }], error: message });
         }
       }
     };
@@ -270,11 +274,20 @@ function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: ()
             <span>Preparing structured records</span>
             <span className="completion-pill">{currentProgress}% <small>{isFailed ? "failed" : "complete"}</small></span>
           </div>
-          <div className="processing-track"><span style={{ width: `${currentProgress}%` }} /></div>
+          <div
+            className="processing-track"
+            role="progressbar"
+            aria-label="Document ingestion progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={currentProgress}
+          >
+            <span style={{ width: `${currentProgress}%` }} />
+          </div>
           <div className="processing-steps">
             {steps.map((step) => (
               <div className={`processing-step ${step.state}`} key={step.label}>
-                <span className="processing-status">
+                <span className={`processing-status${step.state === "active" ? " is-loading" : ""}`}>
                   {step.state === "complete" ? <Icon name="check" size={14} /> : step.state === "active" ? <span /> : "○"}
                 </span>
                 <strong>{step.label}</strong>
@@ -284,9 +297,14 @@ function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: ()
           </div>
           <div className="synthesis-stream">
             <div className="stream-heading"><span><Icon name="terminal" size={15} /> LIVE SYNTHESIS<br />STREAM</span><span className="kernel-status">● Local processing state</span></div>
-            <div className="stream-log"><span>{job ? `${job.files_processed}/${job.files_received}` : "—"}</span><b>{isFailed ? "!" : "✓"}</b> {job?.message ?? "Waiting for ingestion service"}{!isComplete && !isFailed && <span className="cursor-block" />}</div>
-            <div className="stream-log"><span>STATUS</span><b>→</b> {isFailed ? job.error : isComplete ? "All documents processed" : "Processing uploaded documents"}{!isComplete && !isFailed && <span className="cursor-block" />}</div>
-            {(job?.log ?? []).slice(-5).map((line, index) => <div className="stream-log" key={`${index}-${line}`}><span>LOG</span><b>›</b> {line}</div>)}
+            <div className="stream-events" aria-live="polite">
+              {(job?.events ?? []).slice(-4).map((event) => (
+                <div className={`stream-log stream-${event.level}`} key={`${event.timestamp}-${event.message}`}>
+                  <span>{event.timestamp}</span><b>{event.level === "error" ? "!" : event.level === "success" ? "✓" : "→"}</b> {event.message}
+                </div>
+              ))}
+              {!job?.events.length && <div className="stream-log"><span>—</span><b>↻</b> Waiting for ingestion service<span className="cursor-block" /></div>}
+            </div>
             <div className="stream-divider" />
             <div className="stream-note"><Icon name="shield" size={14} /> Source traceability remains available for review</div>
           </div>

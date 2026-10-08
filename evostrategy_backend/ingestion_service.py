@@ -4,9 +4,17 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
+from datetime import datetime, timezone
+from typing import Literal
+
+from ingestion.extraction.llm_parser import parse_document_llm
+from ingestion.ocr.tesseract_engine import extract_text_from_images
+from ingestion.pdf.pdf_to_image import pdf_to_images
+from ingestion.schemas.invoice_schema import DocumentExtraction
+from utils.save_json import save_document
 
 from .job_store import JobStore
-from .models import PipelineStep
+from .models import PipelineStep, StreamEvent
 
 STEPS = (
     ("received", "Documents received", "Files available"),
@@ -48,6 +56,42 @@ def _set_step(store: JobStore, job_id: str, key: str, message: str | None = None
         steps=steps,
         message=message or steps[[s.key for s in steps].index(key)].label,
     )
+
+
+def _emit(
+    store: JobStore,
+    job_id: str,
+    message: str,
+    level: Literal["info", "success", "error"] = "info",
+) -> None:
+    """Append one observable worker event to the job stream."""
+    current = store.get(job_id)
+    if current is None:
+        return
+    event = StreamEvent(
+        timestamp=datetime.now(timezone.utc).strftime("%H:%M:%S"),
+        message=message,
+        level=level,
+    )
+    store.update(job_id, events=[*current.events, event])
+
+
+def _emit(
+    store: JobStore,
+    job_id: str,
+    message: str,
+    level: Literal["info", "success", "error"] = "info",
+) -> None:
+    """Append one observable worker event to the job stream."""
+    current = store.get(job_id)
+    if current is None:
+        return
+    event = StreamEvent(
+        timestamp=datetime.now(timezone.utc).strftime("%H:%M:%S"),
+        message=message,
+        level=level,
+    )
+    store.update(job_id, events=[*current.events, event])
 
 
 def _log(store: JobStore, job_id: str, line: str) -> None:
