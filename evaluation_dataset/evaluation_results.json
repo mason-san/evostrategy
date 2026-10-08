@@ -1,0 +1,221 @@
+{
+  "generated_at": "2026-10-06 21:02 UTC",
+  "h1_extraction": {
+    "target": 0.92,
+    "results": [
+      {
+        "dataset": "clean PDFs, OpenCV clean-up auto",
+        "documents": 19,
+        "fields": 57,
+        "correct": 57,
+        "accuracy": 1.0,
+        "target": 0.92,
+        "meets_target": true
+      },
+      {
+        "dataset": "simulated poor scans, OpenCV clean-up off",
+        "documents": 19,
+        "fields": 57,
+        "correct": 0,
+        "accuracy": 0.0,
+        "target": 0.92,
+        "meets_target": false
+      },
+      {
+        "dataset": "simulated poor scans, OpenCV clean-up auto",
+        "documents": 19,
+        "fields": 57,
+        "correct": 35,
+        "accuracy": 0.614,
+        "target": 0.92,
+        "meets_target": false
+      }
+    ]
+  },
+  "h2_reconciliation": {
+    "targets": {
+      "precision": 0.9,
+      "recall": 0.88
+    },
+    "results": [
+      {
+        "dataset": "demo (planted discrepancies, real OCR)",
+        "genuine_issues": 10,
+        "flagged": 12,
+        "true_positives": 10,
+        "false_positives": [],
+        "false_negatives": [],
+        "quality_flags": 2,
+        "precision": 1.0,
+        "recall": 1.0,
+        "strict_precision": 0.8333,
+        "meets_target": true
+      },
+      {
+        "dataset": "randomised benchmark (20 seeds x 40 orders)",
+        "genuine_issues": 426,
+        "flagged": 426,
+        "true_positives": 426,
+        "precision": 1.0,
+        "recall": 1.0,
+        "worst_seed_precision": 1.0,
+        "worst_seed_recall": 1.0,
+        "false_positive_examples": [],
+        "false_negative_examples": [],
+        "meets_target": true
+      },
+      {
+        "dataset": "randomised benchmark \u2014 HARD (OCR-damaged ids, ledger rows without ids) (20 seeds x 40 orders)",
+        "genuine_issues": 401,
+        "flagged": 408,
+        "true_positives": 393,
+        "precision": 0.9632,
+        "recall": 0.98,
+        "worst_seed_precision": 0.8667,
+        "worst_seed_recall": 0.913,
+        "false_positive_examples": [
+          "not_in_ledger:inv-3-021",
+          "not_in_ledger:inv-5-036",
+          "not_in_ledger:inv-6-022",
+          "not_in_ledger:inv-6-025",
+          "not_in_ledger:inv-7-026",
+          "not_in_ledger:inv-7-028",
+          "not_in_ledger:inv-8-020",
+          "not_in_ledger:inv-8-020b",
+          "not_in_ledger:inv-11-020",
+          "not_in_ledger:inv-11-027"
+        ],
+        "false_negative_examples": [
+          "ledger_mismatch:inv-5-036",
+          "ledger_mismatch:inv-6-022",
+          "ledger_mismatch:inv-6-025",
+          "ledger_mismatch:inv-7-028",
+          "ledger_mismatch:inv-11-027",
+          "ledger_mismatch:inv-13-015",
+          "ledger_mismatch:inv-13-030",
+          "ledger_mismatch:inv-17-029"
+        ],
+        "meets_target": true
+      }
+    ]
+  },
+  "h3_forecasting": {
+    "target_mape": 15.0,
+    "history_months": 33,
+    "period": [
+      "2011-01",
+      "2013-09"
+    ],
+    "metrics": {
+      "revenue": {
+        "holdout_6m_mape": {
+          "linear_regression": 10.35,
+          "arima": 9.78,
+          "ensemble": 4.87
+        },
+        "rolling_3m_mape": {
+          "linear_regression": 14.1,
+          "arima": 9.27,
+          "ensemble": 10.57
+        },
+        "interval_coverage_85": 1.0,
+        "meets_target_holdout": true,
+        "meets_target_rolling": true
+      },
+      "expense": {
+        "holdout_6m_mape": {
+          "linear_regression": 0.7,
+          "arima": 1.89,
+          "ensemble": 0.84
+        },
+        "rolling_3m_mape": {
+          "linear_regression": 2.4,
+          "arima": 1.88,
+          "ensemble": 2.1
+        },
+        "interval_coverage_85": 1.0,
+        "meets_target_holdout": true,
+        "meets_target_rolling": true
+      },
+      "profit": {
+        "holdout_6m_mape": {
+          "linear_regression": 24.76,
+          "arima": 27.48,
+          "ensemble": 12.8
+        },
+        "rolling_3m_mape": {
+          "linear_regression": 52.62,
+          "arima": 26.68,
+          "ensemble": 36.93
+        },
+        "interval_coverage_85": 1.0,
+        "meets_target_holdout": true,
+        "meets_target_rolling": false
+      }
+    }
+  },
+  "h4_review_efficiency": {
+    "target": 0.6,
+    "demo": {
+      "documents_needing_reconciliation": 37,
+      "documents_needing_a_human": 16,
+      "documents_cleared_automatically": 21,
+      "open_cases": 12,
+      "reduction": 0.5676,
+      "target": 0.6,
+      "meets_target": false,
+      "method": "documents a reviewer must open vs. a fully manual cross-check of every reconcilable document",
+      "caveat": "Counts documents, not reviewer minutes; a timed user study would be stronger evidence."
+    },
+    "by_problem_rate": [
+      {
+        "problem_share": 0.05,
+        "documents_needing_reconciliation": 499,
+        "documents_needing_a_human": 84,
+        "documents_cleared_automatically": 415,
+        "open_cases": 48,
+        "reduction": 0.8317,
+        "target": 0.6,
+        "meets_target": true,
+        "method": "documents a reviewer must open vs. a fully manual cross-check of every reconcilable document",
+        "caveat": "Counts documents, not reviewer minutes; a timed user study would be stronger evidence."
+      },
+      {
+        "problem_share": 0.1,
+        "documents_needing_reconciliation": 498,
+        "documents_needing_a_human": 113,
+        "documents_cleared_automatically": 385,
+        "open_cases": 67,
+        "reduction": 0.7731,
+        "target": 0.6,
+        "meets_target": true,
+        "method": "documents a reviewer must open vs. a fully manual cross-check of every reconcilable document",
+        "caveat": "Counts documents, not reviewer minutes; a timed user study would be stronger evidence."
+      },
+      {
+        "problem_share": 0.2,
+        "documents_needing_reconciliation": 484,
+        "documents_needing_a_human": 124,
+        "documents_cleared_automatically": 360,
+        "open_cases": 78,
+        "reduction": 0.7438,
+        "target": 0.6,
+        "meets_target": true,
+        "method": "documents a reviewer must open vs. a fully manual cross-check of every reconcilable document",
+        "caveat": "Counts documents, not reviewer minutes; a timed user study would be stronger evidence."
+      },
+      {
+        "problem_share": 0.35,
+        "documents_needing_reconciliation": 508,
+        "documents_needing_a_human": 228,
+        "documents_cleared_automatically": 280,
+        "open_cases": 148,
+        "reduction": 0.5512,
+        "target": 0.6,
+        "meets_target": false,
+        "method": "documents a reviewer must open vs. a fully manual cross-check of every reconcilable document",
+        "caveat": "Counts documents, not reviewer minutes; a timed user study would be stronger evidence."
+      }
+    ]
+  }
+}

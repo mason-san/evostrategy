@@ -2,82 +2,57 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Project overview
 
-Python-based document processing pipeline (Stage 1) that extracts structured data from PDF documents using OCR and LLM-based generic field extraction. Labels and values are preserved exactly as they appear in the source document without assuming document type or forcing fixed business field schemas.
+EvoStrategy is a four-stage, locally deployed system: document ingestion/OCR →
+cross-document reconciliation → human verification → verified analytics,
+forecasting, cash runway and what-if. See README.md (overview, commands, API),
+docs/DFD.md (data flow), docs/EVALUATION.md (measured results) and
+docs/USER_MANUAL.md (reviewer guide).
 
-**Core flow**: PDF → images (PyMuPDF) → OCR text (Tesseract) → generic structured extractions (`parse_document_llm`) → Pydantic validation (`DocumentExtraction`) → JSON output
-
-## Prerequisites
-
-- Python 3.10+ (uses `list[Path]` type hints)
-- System-level **Tesseract OCR** binary:
-  - macOS: `brew install tesseract`
-  - Ubuntu/Debian: `sudo apt install tesseract-ocr`
-- For LLM parser: `GEMINI_API_KEY` environment variable (get free key from https://aistudio.google.com/apikey)
-
-## Setup
+## Setup and run
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt                    # needs the Tesseract binary on PATH
+cd evostrategy_frontend && npm ci && npm run build && cd ..
+uvicorn evostrategy_backend.main:app --port 8000   # API + UI on http://127.0.0.1:8000
+python pipeline.py demo                            # or load the demo from the UI
+pytest                                             # 89 tests, storage isolated in a temp dir
 ```
 
-For LLM parser support:
-```bash
-export GEMINI_API_KEY="your-key-here"
-```
+Optional: `GEMINI_API_KEY` or `LLM_PROVIDER=ollama` for LLM extraction (default
+offline rule parser); `OCR_SECOND_ENGINE=paddle` for PaddleOCR agreement checks.
 
-## Running the Pipeline
+## Code map
 
-```bash
-# Process a single document (currently hardcoded to invoice_012.pdf in pipeline.py)
-python pipeline.py
-```
+| Path | Purpose |
+|---|---|
+| `pipeline.py` | CLI: `demo`, `run <paths>`, `reconcile`, `status`, `reset` |
+| `ingestion/service.py` | `ingest_file()` for PDF / images / DOCX / CSV / XLSX |
+| `ingestion/pdf/`, `ingestion/ocr/` | 300 DPI rendering; Tesseract with word confidences; OpenCV clean-up (`preprocess.py`); optional PaddleOCR (`paddle_engine.py`) |
+| `ingestion/extraction/` | `dispatcher.py` chooses Gemini / Ollama / offline `rule_parser.py`; per-field confidence |
+| `reconciliation/orchestrator.py` | `reconcile_documents()`: mapping, normalization, linking, duplicates, comparisons, cases, transactions |
+| `reconciliation/entity_resolution.py` | Jaro-Winkler ≥ 0.90 + word-coverage guard |
+| `storage/registry.py` | SQLite: documents, links, transactions, cases, hash-chained review log, settings, forecast snapshots |
+| `analytics/verified.py` | The reconciliation gate — the only input to Stage 4 |
+| `analytics/` | `aggregates.py`, `finance.py` (quarterly, runway), `forecasting.py`, `whatif.py`, `efficiency.py` |
+| `evostrategy_backend/` | FastAPI (`main.py`), read models (`workspace.py`), ingestion jobs |
+| `evostrategy_frontend/` | React + Vite workspace (`Workspace.tsx`, `Finance.tsx`) |
+| `scripts/` | demo data, evaluations (`evaluate_all.py`), confidence calibration |
+| `dashboard/` | earlier Streamlit prototype, superseded by the React workspace |
 
-## Architecture
+## Rules that must hold
 
-### Pipeline Components
+- Stage 1 never renames or normalizes labels/values; meaning is assigned in Stage 2.
+- Analytics, forecasts, runway and what-if read only `analytics.verified.verified_transactions()`.
+- Reviewer decisions are never overwritten by reruns; the review log is append-only and hash-chained.
+- Schema changes are additive (CREATE IF NOT EXISTS / ADD COLUMN); `reset` backs the old registry up.
+- Tests must never touch a real data directory (`tests/conftest.py` forces a temp dir).
+- Report metrics honestly: say which dataset (demo/synthetic vs real) a number comes from.
 
-1. **PDF Rasterization** (`ingestion/pdf/pdf_to_image.py`)
-   - Uses PyMuPDF to render PDF pages as PNG images at 3× resolution
-   - Output: `data/processed/images/`
+## Team branches
 
-2. **OCR Text Extraction** (`ingestion/ocr/tesseract_engine.py`)
-   - Runs Tesseract on rendered images via `pytesseract` wrapper
-   - Concatenates multi-page text into single string
-
-3. **Parsing** (`ingestion/extraction/llm_parser.py`)
-   - **`llm_parser.py`**: Gemini-based generic document extraction with structured JSON output (requires `GEMINI_API_KEY`)
-   - Implements signature: `parse_document_llm(text: str) -> dict`
-
-4. **Validation** (`ingestion/schemas/invoice_schema.py`)
-   - Pydantic `DocumentExtraction` model with `ConfigDict(extra="allow")`
-   - Accepts arbitrary key-value pairs without assuming fixed business schemas
-
-5. **Output** (`utils/save_json.py`)
-   - Saves `DocumentExtraction` objects as JSON to `data/processed/extracted/`
-
-## Data Directories
-
-- `data/raw/invoices/`: Input PDF files
-- `data/processed/images/`: Rendered PNG images (gitignored)
-- `data/processed/extracted/`: Output JSON files (gitignored)
-
-## Team Workflow
-
-- **Active development branch**: `mazin-ocr` (OCR & ingestion)
-- Other team branches: `Adham-Reconcilation`, `Dashboard`, `prateek-analytic&forecasting`
-- Feature branches targeting OCR/ingestion should branch from and merge into `mazin-ocr`
-
-## File Responsibilities Reference
-
-| File | Purpose |
-|------|---------|
-| `pipeline.py` | Main entrypoint, orchestrates full processing flow |
-| `ingestion/pdf/pdf_to_image.py` | PDF → PNG conversion |
-| `ingestion/ocr/tesseract_engine.py` | Image → OCR text |
-| `ingestion/extraction/llm_parser.py` | Gemini-based generic document parser |
-| `ingestion/schemas/invoice_schema.py` | Generic `DocumentExtraction` Pydantic model |
-| `utils/save_json.py` | JSON serialization |
+`main` / `mazin-ocr` (Stage 1 baseline), `Adham-Reconcilation`, `Dashboard`,
+`prateek-analytic&forecasting`, and `integration/stage4-backend-workspace`
+(the integrated system). Do not merge into `main` without the team's agreement.

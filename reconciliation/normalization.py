@@ -277,8 +277,28 @@ def normalize_identifier(value: Any) -> NormalizationResult:
     """Trim and case-fold an identifier while retaining meaningful punctuation."""
     if _missing(value):
         return NormalizationResult(None, NormalizationMethod.NONE, NormalizationStatus.MISSING)
-    normalized = re.sub(r"\s+", " ", str(value).strip()).upper()
+    # OCR often splits identifiers ("41 143" vs "41143"); whitespace is never
+    # meaningful for comparison, so the comparison form drops it entirely.
+    normalized = re.sub(r"\s+", "", str(value).strip()).upper()
     return NormalizationResult(normalized, NormalizationMethod.IDENTIFIER, NormalizationStatus.SUCCESS)
+
+
+_OCR_CONFUSABLES = str.maketrans({"O": "0", "Q": "0", "I": "1", "L": "1", "|": "1"})
+
+
+def identifier_match_key(value: Any) -> str | None:
+    """Comparison key that survives common OCR damage to identifiers.
+
+    Used only to decide whether two identifiers refer to the same thing; the
+    stored and displayed value is unchanged. Separators are dropped (OCR loses
+    hyphens and inserts spaces) and look-alike characters are folded
+    (O/0, I/1, L/1). Near-identical but different identifiers, such as order
+    numbers that differ in one digit, still do not match.
+    """
+    normalized = normalize_identifier(value).normalized_value
+    if normalized is None:
+        return None
+    return re.sub(r"[-_/.,:]", "", str(normalized)).translate(_OCR_CONFUSABLES) or None
 
 
 def _simple_numeric(value: Any, method: NormalizationMethod) -> NormalizationResult:

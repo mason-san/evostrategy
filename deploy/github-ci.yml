@@ -1,0 +1,55 @@
+# Runs on every push / pull request: tests, frontend build, Docker images,
+# and a deployment smoke test of the three-tier Compose stack.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci && npm run build
+        working-directory: evostrategy_frontend
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the three tiers
+        run: docker compose up --build -d
+      - name: Smoke test through the presentation tier
+        run: |
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/health && break; sleep 2; done
+          curl -fsS http://127.0.0.1:8000/ | grep -q '<div id="root">'
+          curl -fsS http://127.0.0.1:8000/api/summary
+          # load the demo company end to end inside the containers (OCR + reconciliation)
+          job=$(curl -fsS -X POST http://127.0.0.1:8000/api/demo | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
+          for i in $(seq 1 120); do
+            status=$(curl -fsS http://127.0.0.1:8000/api/ingestion/jobs/$job | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+            [ "$status" = completed ] || [ "$status" = failed ] && break; sleep 5
+          done
+          echo "demo job: $status"; [ "$status" = completed ]
+          curl -fsS http://127.0.0.1:8000/api/summary | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['documents'], 'documents,', d['open_cases'], 'open cases'); assert d['documents'] > 0"
+          curl -fsS "http://127.0.0.1:8000/api/forecast?metric=revenue" | python3 -c "import sys,json; d=json.load(sys.stdin); print('ensemble MAPE', d['backtest']['mape']['ensemble'])"
+          curl -fsS http://127.0.0.1:8000/api/runway | python3 -c "import sys,json; print(json.load(sys.stdin)['summary'])"
+      - name: Single-container "shoebox" image also runs on its own
+        run: |
+          docker build -t evostrategy-app .
+          docker run -d --name shoebox -p 127.0.0.1:8100:8000 evostrategy-app
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8100/health && break; sleep 2; done
+          curl -fsS http://127.0.0.1:8100/ | grep -q '<div id="root">'
+      - if: always()
+        run: docker compose logs --no-color | tail -100
