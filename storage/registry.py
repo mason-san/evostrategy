@@ -113,6 +113,18 @@ def upsert_documents(documents: Iterable[dict[str, Any]], db_path: Path = REGIST
             )
 
 
+def delete_documents_by_source(source_name: str, db_path: Path = REGISTRY_DB) -> int:
+    """Remove every record extracted from one source file; returns how many.
+
+    Reviewer decisions and the audit log are not touched. Re-run reconciliation
+    afterwards so links, transactions and open cases no longer reference them.
+    """
+    init_registry(db_path)
+    with _connect(db_path) as connection:
+        cursor = connection.execute("DELETE FROM documents WHERE source_name=?", (source_name,))
+        return cursor.rowcount
+
+
 def get_documents(db_path: Path = REGISTRY_DB) -> list[dict[str, Any]]:
     """Return every stored source document payload."""
     init_registry(db_path)

@@ -135,6 +135,29 @@ function UploadScreen({ onBack, onNext, onDemo }: { onBack: () => void; onNext: 
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [uploadError, setUploadError] = useState("");
+  const [stored, setStored] = useState<Array<{ name: string; records: number }>>([]);
+  const [busyFile, setBusyFile] = useState("");
+
+  const loadStored = () => api.documents().then((rows) => {
+    const counts = new Map<string, number>();
+    rows.forEach((row) => counts.set(row.source_name, (counts.get(row.source_name) ?? 0) + 1));
+    setStored([...counts].map(([name, records]) => ({ name, records })));
+  }).catch(() => setStored([]));
+  useEffect(() => { void loadStored(); }, []);
+
+  const removeStored = async (name: string) => {
+    setBusyFile(name); setUploadError("");
+    try { await api.removeSource(name); await loadStored(); }
+    catch (error) { setUploadError(error instanceof Error ? error.message : "The file could not be removed."); }
+    finally { setBusyFile(""); }
+  };
+  const removeAllStored = async () => {
+    if (!window.confirm(`Remove all ${stored.length} stored file(s) and their reconciliation results? The previous workspace is backed up first.`)) return;
+    setBusyFile("*"); setUploadError("");
+    try { await api.reset(); await loadStored(); }
+    catch (error) { setUploadError(error instanceof Error ? error.message : "The workspace could not be cleared."); }
+    finally { setBusyFile(""); }
+  };
 
   const addFiles = (selectedFiles: FileList | File[]) => {
     const nextFiles = Array.from(selectedFiles).map((file) => ({
@@ -186,6 +209,22 @@ function UploadScreen({ onBack, onNext, onDemo }: { onBack: () => void; onNext: 
           <span className="active-chip">AI Cluster Engine Active</span>
           <span className="manual-note">No manual tagging required</span>
         </div>
+        {stored.length > 0 && (
+          <div className="stored-sources">
+            <div className="stored-head">
+              <span><b>{stored.length}</b> file{stored.length === 1 ? "" : "s"} already in your workspace ({stored.reduce((n, f) => n + f.records, 0)} records) — new uploads are added to these.</span>
+              <button className="stored-clear" disabled={!!busyFile} onClick={() => void removeAllStored()}>Remove all</button>
+            </div>
+            <ul>
+              {stored.map((file) => (
+                <li key={file.name}>
+                  <span>{file.name}{file.records > 1 ? ` · ${file.records} records` : ""}</span>
+                  <button disabled={!!busyFile} onClick={() => void removeStored(file.name)}>{busyFile === file.name ? "Removing…" : "Remove"}</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="source-list">
           {files.length === 0 && <div className="empty-source-state">No documents added yet.</div>}
           {files.map((file) => (

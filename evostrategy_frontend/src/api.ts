@@ -267,6 +267,8 @@ export const api = {
     request<CaseDetail>(`/api/cases/${id(caseId)}/review`, json(body)),
   audit: () => request<ReviewAction[]>("/api/audit"),
   documents: () => request<DocumentRow[]>("/api/documents"),
+  removeSource: (sourceName: string) => request<{ source_name: string; removed_records: number }>(`/api/sources/${id(sourceName)}`, { method: "DELETE" }),
+  reset: () => request<{ status: string; backup: string | null }>("/api/reset", { method: "POST" }),
   document: (documentId: string) => request<DocumentDetail>(`/api/documents/${id(documentId)}`),
   pageUrl: (documentId: string, page: number) => `${API_BASE_URL}/api/documents/${id(documentId)}/pages/${page}`,
   overview: () => request<Overview>("/api/analytics/overview"),

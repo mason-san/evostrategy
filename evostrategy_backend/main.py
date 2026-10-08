@@ -40,7 +40,7 @@ from storage import registry
 from utils.config import DEFAULT_FORECAST_HORIZON, DEMO_DATA_DIR, PROJECT_ROOT, UPLOAD_DIR
 
 from . import workspace
-from .ingestion_service import initial_steps, process_demo_job, process_job
+from .ingestion_service import _PIPELINE_LOCK, initial_steps, process_demo_job, process_job
 from .job_store import JobStore
 from .models import AssistantRequest, IngestionJob, ReviewRequest, ScenarioRequest, SettingsRequest
 
@@ -141,6 +141,19 @@ def get_summary() -> dict:
 @app.get("/api/documents")
 def get_documents() -> list[dict]:
     return workspace.list_documents()
+
+
+@app.delete("/api/sources/{source_name:path}")
+def delete_source(source_name: str) -> dict:
+    """Remove one uploaded file (all records extracted from it) and re-reconcile."""
+    from pipeline import run_reconciliation
+
+    with _PIPELINE_LOCK:
+        removed = registry.delete_documents_by_source(source_name)
+        if not removed:
+            raise HTTPException(status_code=404, detail="No stored records for that file.")
+        run_reconciliation()
+    return {"source_name": source_name, "removed_records": removed}
 
 
 @app.get("/api/documents/{document_id}")
