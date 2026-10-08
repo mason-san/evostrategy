@@ -127,8 +127,9 @@ class StorageAndUtilityTesting2(unittest.TestCase):
         upsert_cases([{**case, "status": "AUTO_RESOLVED"}], self.database)
 
         import sqlite3
+        from contextlib import closing
 
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection:
             row_count = connection.execute(
                 "SELECT COUNT(*) FROM reconciliation_cases"
             ).fetchone()[0]
@@ -153,7 +154,8 @@ class StorageAndUtilityTesting2(unittest.TestCase):
     def test_project_paths_are_rooted_at_repository(self) -> None:
         """Central configuration resolves paths from the repository root."""
         self.assertTrue(PROJECT_ROOT.exists())
-        self.assertEqual(PROJECT_ROOT.name, "evostrategy")
+        # the clone may live in any folder name (e.g. evostrategy-backup)
+        self.assertTrue((PROJECT_ROOT / "pipeline.py").is_file())
 
 
 if __name__ == "__main__":

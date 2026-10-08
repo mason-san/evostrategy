@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { api, humanize, percent, type IngestionJob, type Summary } from "./api";
+import { Workspace } from "./Workspace";
 
 type IconName = "brain" | "folder" | "document" | "orders" | "payment" | "ledger" | "reports" | "clip" | "swap" | "arrow" | "upload" | "chevron" | "plus" | "check" | "terminal" | "shield" | "verified" | "hub" | "link" | "download";
 
@@ -128,11 +130,8 @@ function IntelligencePanel() {
 }
 
 type UploadFile = { file: File; name: string; size: string; type: string };
-type PipelineStep = { key: string; label: string; detail: string; state: "pending" | "active" | "complete" | "failed" };
-type IngestionJob = { job_id: string; status: "queued" | "running" | "completed" | "failed"; progress: number; files_received: number; files_processed: number; steps: PipelineStep[]; message: string; error?: string | null };
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
 
-function UploadScreen({ onBack, onNext }: { onBack: () => void; onNext: (files: File[]) => Promise<void> }) {
+function UploadScreen({ onBack, onNext, onDemo }: { onBack: () => void; onNext: (files: File[]) => Promise<void>; onDemo: () => Promise<void> }) {
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [uploadError, setUploadError] = useState("");
@@ -175,10 +174,10 @@ function UploadScreen({ onBack, onNext }: { onBack: () => void; onNext: (files: 
           onDragLeave={() => setIsDragging(false)}
           onDrop={(event) => { event.preventDefault(); setIsDragging(false); addFiles(event.dataTransfer.files); }}
         >
-          <input type="file" accept=".pdf,.csv,.xlsx,.docx" multiple onChange={(event) => event.target.files && addFiles(event.target.files)} />
+          <input type="file" accept=".pdf,.csv,.xlsx,.docx,.png,.jpg,.jpeg,.tif,.tiff" multiple onChange={(event) => event.target.files && addFiles(event.target.files)} />
           <span className="upload-icon"><Icon name="upload" size={25} /></span>
           <span className="drop-title">Drop your files here or <strong>browse your computer</strong></span>
-          <span className="drop-help">PDF, CSV, XLSX, DOCX and common business documents (Source-faithful parsing)</span>
+          <span className="drop-help">PDF, scanned images, CSV, XLSX and DOCX business documents (Source-faithful parsing)</span>
           <span className="drop-note">⌘ &nbsp; Automated classification · no manual tagging required</span>
         </label>
 
@@ -203,6 +202,9 @@ function UploadScreen({ onBack, onNext }: { onBack: () => void; onNext: (files: 
         <button className="add-documents" onClick={() => document.querySelector<HTMLInputElement>(".dropzone input")?.click()}>
           <Icon name="plus" size={17} /> Add more documents
         </button>
+        <button className="demo-link" onClick={() => { setUploadError(""); onDemo().catch((error: unknown) => setUploadError(error instanceof Error ? error.message : "Sample data could not be loaded.")); }}>
+          No documents handy? <strong>Use a sample company's invoices, payments and ledger →</strong>
+        </button>
         {uploadError && <p className="upload-error">{uploadError}</p>}
         <div className="onboarding-actions">
           <button className="back-button" onClick={onBack}>
@@ -218,11 +220,11 @@ function UploadScreen({ onBack, onNext }: { onBack: () => void; onNext: (files: 
 }
 
 const processingSteps = [
-  { label: "Documents received", detail: "Files available", state: "complete" },
-  { label: "Extracting business information", detail: "Source-faithful fields", state: "complete" },
-  { label: "Reconciling records", detail: "Reviewable comparisons", state: "complete" },
-  { label: "Building company intelligence", detail: "Preparing your workspace", state: "active" },
-  { label: "Preparing your workspace", detail: "Next", state: "pending" },
+  { label: "Documents received", detail: "Files saved for processing", state: "complete" },
+  { label: "Extracting business information", detail: "Rasterizing pages and running OCR", state: "active" },
+  { label: "Validating extracted data", detail: "Checking source-faithful fields", state: "pending" },
+  { label: "Persisting source records", detail: "Writing traceable JSON output", state: "pending" },
+  { label: "Preparing your workspace", detail: "Ready for the next stage", state: "pending" },
 ] as const;
 
 function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: () => void; onNext: () => void }) {
@@ -230,11 +232,12 @@ function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: ()
 
   useEffect(() => {
     let cancelled = false;
+    let interval = 0;
     const poll = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/ingestion/jobs/${jobId}`);
-        if (!response.ok) throw new Error("Unable to read ingestion progress.");
-        if (!cancelled) setJob(await response.json() as IngestionJob);
+        const next = await api.job(jobId);
+        if (!cancelled) setJob(next);
+        if (next.status === "completed" || next.status === "failed") window.clearInterval(interval);
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : "Unable to read ingestion progress.";
@@ -243,7 +246,7 @@ function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: ()
       }
     };
     void poll();
-    const interval = window.setInterval(() => void poll(), 800);
+    interval = window.setInterval(() => void poll(), 800);
     return () => { cancelled = true; window.clearInterval(interval); };
   }, [jobId]);
 
@@ -267,11 +270,20 @@ function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: ()
             <span>Preparing structured records</span>
             <span className="completion-pill">{currentProgress}% <small>{isFailed ? "failed" : "complete"}</small></span>
           </div>
-          <div className="processing-track"><span style={{ width: `${currentProgress}%` }} /></div>
+          <div
+            className="processing-track"
+            role="progressbar"
+            aria-label="Document ingestion progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={currentProgress}
+          >
+            <span style={{ width: `${currentProgress}%` }} />
+          </div>
           <div className="processing-steps">
             {steps.map((step) => (
               <div className={`processing-step ${step.state}`} key={step.label}>
-                <span className="processing-status">
+                <span className={`processing-status${step.state === "active" ? " is-loading" : ""}`}>
                   {step.state === "complete" ? <Icon name="check" size={14} /> : step.state === "active" ? <span /> : "○"}
                 </span>
                 <strong>{step.label}</strong>
@@ -283,6 +295,7 @@ function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: ()
             <div className="stream-heading"><span><Icon name="terminal" size={15} /> LIVE SYNTHESIS<br />STREAM</span><span className="kernel-status">● Local processing state</span></div>
             <div className="stream-log"><span>{job ? `${job.files_processed}/${job.files_received}` : "—"}</span><b>{isFailed ? "!" : "✓"}</b> {job?.message ?? "Waiting for ingestion service"}{!isComplete && !isFailed && <span className="cursor-block" />}</div>
             <div className="stream-log"><span>STATUS</span><b>→</b> {isFailed ? job.error : isComplete ? "All documents processed" : "Processing uploaded documents"}{!isComplete && !isFailed && <span className="cursor-block" />}</div>
+            {(job?.log ?? []).slice(-5).map((line, index) => <div className="stream-log" key={`${index}-${line}`}><span>LOG</span><b>›</b> {line}</div>)}
             <div className="stream-divider" />
             <div className="stream-note"><Icon name="shield" size={14} /> Source traceability remains available for review</div>
           </div>
@@ -303,26 +316,60 @@ function ProcessingScreen({ jobId, onBack, onNext }: { jobId: string; onBack: ()
   );
 }
 
-type ReadyMetric = { label: string; value: string; detail: string; tone?: "success" | "attention" };
+function timeAgo(value: string | null) {
+  if (!value) return "just now";
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(`${value.replace(" ", "T")}Z`).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3600)}h ago`;
+}
 
-const readySummary: ReadyMetric[] = [
-  { label: "Sources analyzed", value: "30", detail: "documents processed" },
-  { label: "Knowledge entities", value: "1,284", detail: "records understood" },
-  { label: "Audit accuracy", value: "96%", detail: "successfully reconciled", tone: "success" },
-  { label: "Discrepancies", value: "42", detail: "items need your attention", tone: "attention" },
-] as const;
+function downloadReport(summary: Summary) {
+  const lines = [
+    "EvoStrategy — ingestion & reconciliation report",
+    `Generated: ${new Date().toISOString()}`,
+    "",
+    `Source files: ${summary.source_files}`,
+    `Documents extracted: ${summary.documents}`,
+    `Fields extracted: ${summary.fields}`,
+    `Low-confidence extractions: ${summary.low_confidence_documents}`,
+    `Transactions: ${summary.transactions}`,
+    `Passed reconciliation gate: ${summary.verified_transactions} (${percent(summary.verified_rate, 1)})`,
+    `Open review cases: ${summary.open_cases}`,
+    "",
+    "Document types:",
+    ...Object.entries(summary.document_types).map(([type, count]) => `  ${humanize(type)}: ${count}`),
+    "",
+    "Case outcomes:",
+    ...Object.entries(summary.case_status_counts).map(([status, count]) => `  ${humanize(status)}: ${count}`),
+    "",
+    "Open discrepancies:",
+    ...Object.entries(summary.discrepancy_types).map(([type, count]) => `  ${humanize(type)}: ${count}`),
+  ];
+  const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/plain" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "evostrategy-ingestion-report.txt";
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
-const readyCategories = [
-  "Revenue streams",
-  "Customers & accounts",
-  "Vendors & supply",
-  "Transactions",
-  "Payments & aging",
-  "Orders",
-  "Business trends & seasonality",
-];
+function ReadyScreen({ onEnter }: { onEnter: () => void }) {
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => { api.summary().then(setSummary).catch((e: Error) => setError(e.message)); }, []);
 
-function ReadyScreen({ onBack }: { onBack: () => void }) {
+  const metrics = summary ? [
+    { label: "Sources analyzed", value: String(summary.source_files), detail: `files · ${summary.documents} records` },
+    { label: "Knowledge entities", value: summary.fields.toLocaleString(), detail: "fields understood" },
+    { label: "Audit accuracy", value: percent(summary.auto_verified_rate, 1), detail: "reconciled automatically", tone: "success" as const },
+    { label: "Discrepancies", value: String(summary.open_cases), detail: "items need your attention", tone: "attention" as const },
+  ] : [];
+  const categories = summary ? [
+    ...Object.keys(summary.document_types).map((type) => `${humanize(type)}s`),
+    ...summary.categories.slice(0, 6),
+  ] : [];
+
   return (
     <main className="app-shell ready-shell">
       <header className="topbar">
@@ -344,10 +391,11 @@ function ReadyScreen({ onBack }: { onBack: () => void }) {
         <section className="ready-card">
           <div className="ready-card-heading">
             <span><Icon name="verified" size={16} /> Ingestion &amp; synthesis summary</span>
-            <small>Validated 12s ago</small>
+            <small>Validated {timeAgo(summary?.last_run_at ?? null)}</small>
           </div>
+          {error && <p className="upload-error">{error}</p>}
           <div className="ready-metrics">
-            {readySummary.map((metric) => (
+            {metrics.map((metric) => (
               <div className={`ready-metric ${metric.tone ?? ""}`} key={metric.label}>
                 <span className="metric-label">{metric.tone === "success" && <i />} {metric.label}</span>
                 <strong>{metric.value}</strong>
@@ -360,17 +408,17 @@ function ReadyScreen({ onBack }: { onBack: () => void }) {
 
         <section className="ready-card understanding-card">
           <h2><Icon name="hub" size={17} /> EvoStrategy now understands:</h2>
-          <p>Multi-layered ontology mapped across transactional databases, general ledgers, CRM objects, and supply pipelines.</p>
+          <p>Document types, business categories and counterparties mapped from your own labels — reconciled before any number reaches analytics.</p>
           <div className="category-list">
-            {readyCategories.map((category) => <span key={category}><i />{category}</span>)}
+            {categories.map((category) => <span key={category}><i />{category}</span>)}
           </div>
         </section>
 
         <div className="source-notice"><Icon name="link" size={17} /> All answers in your workspace link directly back to verified source records.</div>
 
         <div className="ready-actions">
-          <button className="report-button"><Icon name="download" size={16} /> Download ingestion report</button>
-          <button className="workspace-button" onClick={onBack}>Enter your workspace <Icon name="arrow" size={18} /></button>
+          <button className="report-button" disabled={!summary} onClick={() => summary && downloadReport(summary)}><Icon name="download" size={16} /> Download ingestion report</button>
+          <button className="workspace-button" onClick={onEnter}>Enter your workspace <Icon name="arrow" size={18} /></button>
         </div>
       </section>
     </main>
@@ -378,11 +426,19 @@ function ReadyScreen({ onBack }: { onBack: () => void }) {
 }
 
 export function App() {
-  const [screen, setScreen] = useState<"welcome" | "upload" | "processing" | "ready">("welcome");
+  const [screen, setScreen] = useState<"welcome" | "upload" | "processing" | "ready" | "workspace">("welcome");
   const [jobId, setJobId] = useState("");
 
+  const startJob = (job: IngestionJob) => {
+    setJobId(job.job_id);
+    setScreen("processing");
+  };
+
+  if (screen === "workspace") {
+    return <Workspace onAddDocuments={() => setScreen("upload")} onLoadDemo={() => api.loadDemo().then(startJob)} />;
+  }
   if (screen === "ready") {
-    return <ReadyScreen onBack={() => setScreen("processing")} />;
+    return <ReadyScreen onEnter={() => setScreen("workspace")} />;
   }
   if (screen === "processing") {
     return <ProcessingScreen jobId={jobId} onBack={() => setScreen("upload")} onNext={() => setScreen("ready")} />;
@@ -390,20 +446,8 @@ export function App() {
   if (screen === "upload") {
     return <UploadScreen
       onBack={() => setScreen("welcome")}
-      onNext={async (files) => {
-        const formData = new FormData();
-        files.forEach((file) => formData.append("files", file));
-        let response: Response;
-        try {
-          response = await fetch(`${API_BASE_URL}/api/ingestion/jobs`, { method: "POST", body: formData });
-        } catch {
-          throw new Error("The ingestion service is unavailable. Start the FastAPI backend on port 8000 and try again.");
-        }
-        if (!response.ok) throw new Error("Documents could not be queued for ingestion.");
-        const job = await response.json() as IngestionJob;
-        setJobId(job.job_id);
-        setScreen("processing");
-      }}
+      onNext={async (files) => startJob(await api.uploadDocuments(files))}
+      onDemo={async () => startJob(await api.loadDemo())}
     />;
   }
 

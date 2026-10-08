@@ -1,13 +1,33 @@
-"""Deterministic, confidence-aware resolution of normalized entity values."""
+"""Deterministic, confidence-aware resolution of normalized entity values.
+
+Scoring follows the implementation plan: Jaro-Winkler similarity (rapidfuzz)
+with a resolved threshold of 0.90. Jaro-Winkler rewards shared prefixes, so on
+its own it would treat "ABC Corp" and "ABC Corp India" as the same company. A
+token-coverage guard therefore keeps those pairs AMBIGUOUS for a reviewer:
+every word of each name must have a close (Jaro-Winkler >= 0.90) partner in
+the other name before a fuzzy pair is RESOLVED.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from enum import StrEnum
 from typing import Any
 
 from reconciliation.normalization import normalize_entity
+
+try:  # rapidfuzz is the planned dependency; difflib keeps tests runnable without it
+    from rapidfuzz.distance import JaroWinkler as _JaroWinkler
+
+    def jaro_winkler(left: str, right: str) -> float:
+        return float(_JaroWinkler.similarity(left, right))
+except ImportError:  # pragma: no cover - exercised only when rapidfuzz is absent
+    from difflib import SequenceMatcher
+
+    def jaro_winkler(left: str, right: str) -> float:
+        return SequenceMatcher(None, left, right).ratio()
+
+TOKEN_MATCH_THRESHOLD = 0.90
 
 
 class EntityType(StrEnum):
@@ -37,12 +57,12 @@ class ResolutionMethod(StrEnum):
 class ResolutionConfig:
     """Configurable thresholds for deterministic entity resolution.
 
-    A 0.85 resolved threshold requires both strong character similarity and
-    meaningful token overlap. Scores from 0.70 through that threshold remain
+    The 0.90 resolved threshold is the plan's Jaro-Winkler cut-off. Scores
+    from 0.70 up to it, or high scores whose words do not all line up, stay
     explicitly ambiguous instead of being silently accepted.
     """
 
-    resolved_threshold: float = 0.85
+    resolved_threshold: float = 0.90
     ambiguous_threshold: float = 0.70
 
     def __post_init__(self) -> None:
@@ -90,27 +110,25 @@ def _is_missing(value: Any) -> bool:
     )
 
 
-def _token_similarity(left: str, right: str) -> float:
-    """Compare token sets so shared suffixes cannot dominate the score."""
-    left_tokens = set(left.split())
-    right_tokens = set(right.split())
+def token_coverage(left: str, right: str) -> float:
+    """Share of words (in both names) that have a close partner in the other name."""
+    left_tokens, right_tokens = left.split(), right.split()
     if not left_tokens or not right_tokens:
         return 0.0
-    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+    def covered(tokens: list[str], others: list[str]) -> int:
+        return sum(any(jaro_winkler(t, o) >= TOKEN_MATCH_THRESHOLD for o in others) for t in tokens)
+
+    return (covered(left_tokens, right_tokens) + covered(right_tokens, left_tokens)) / (
+        len(left_tokens) + len(right_tokens)
+    )
 
 
 def _similarity(left: str, right: str) -> float:
-    """Combine character and token similarity for business names."""
-    character_score = SequenceMatcher(None, left, right).ratio()
-    token_score = _token_similarity(left, right)
-    token_order_score = SequenceMatcher(
-        None, " ".join(sorted(left.split())), " ".join(sorted(right.split()))
-    ).ratio()
-    # Token overlap prevents names sharing only a generic suffix from matching.
-    return round(
-        0.45 * character_score + 0.35 * token_order_score + 0.20 * token_score,
-        3,
-    )
+    """Jaro-Winkler similarity of the two names (token order ignored)."""
+    direct = jaro_winkler(left, right)
+    reordered = jaro_winkler(" ".join(sorted(left.split())), " ".join(sorted(right.split())))
+    return round(max(direct, reordered), 3)
 
 
 def _coerce_entity_type(entity_type: EntityType | str) -> EntityType:
@@ -163,13 +181,13 @@ def resolve_normalized_entities(
         )
 
     score = _similarity(left, right)
-    status = (
-        ResolutionStatus.RESOLVED
-        if score >= config.resolved_threshold
-        else ResolutionStatus.AMBIGUOUS
-        if score >= config.ambiguous_threshold
-        else ResolutionStatus.UNRESOLVED
-    )
+    coverage = token_coverage(left, right)
+    if score >= config.resolved_threshold and coverage == 1.0:
+        status = ResolutionStatus.RESOLVED
+    elif score >= config.ambiguous_threshold and coverage > 0.5:
+        status = ResolutionStatus.AMBIGUOUS
+    else:
+        status = ResolutionStatus.UNRESOLVED
     return EntityResolutionResult(
         resolved_type,
         status == ResolutionStatus.RESOLVED,

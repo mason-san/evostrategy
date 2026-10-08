@@ -7,6 +7,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Any, Iterable
 
+from reconciliation.normalization import identifier_match_key
 from reconciliation.entity_resolution import (
     EntityType,
     ResolutionConfig,
@@ -181,7 +182,7 @@ def _identifier_evidence(left: _DocumentFacts, right: _DocumentFacts) -> tuple[b
         (a.field_id, b.field_id)
         for a in left.identifiers
         for b in right.identifiers
-        if a.normalized_value == b.normalized_value
+        if identifier_match_key(a.normalized_value) == identifier_match_key(b.normalized_value)
     ]
     return bool(matches), tuple(identifier for pair in matches for identifier in pair)
 
