@@ -89,6 +89,8 @@ pytest                                          # 89 tests (storage isolated in 
 |---|---|---|
 | `LLM_PROVIDER` | `auto` | `gemini`, `ollama`, `rules`, or `auto` (Gemini if a key is set, else rules) |
 | `GEMINI_API_KEY` | — | Enables Gemini extraction and semantic-mapping fallback |
+| `ANTHROPIC_API_KEY` | — | Enables the Home-screen assistant (Claude + read-only tools over verified data, `assistant/`); put it in `.env` |
+| `ASSISTANT_MODEL` | `claude-opus-5-5` | Default assistant model (also selectable in the UI) |
 | `OLLAMA_MODEL` / `OLLAMA_URL` | — / `http://127.0.0.1:11434` | Local LLM extraction |
 | `OCR_PREPROCESS` | `auto` | OpenCV clean-up: `auto` (only pages that read poorly), `always`, `off` |
 | `OCR_SECOND_ENGINE` | — | `paddle` to add PaddleOCR agreement checks (needs `pip install paddleocr paddlepaddle`) |
