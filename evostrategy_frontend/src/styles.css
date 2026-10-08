@@ -647,3 +647,11 @@ h1 {
   .ready-actions { align-items: stretch; flex-direction: column; }
   .workspace-button, .report-button { justify-content: center; }
 }
+
+.stored-sources { margin: 14px 0 6px; padding: 12px 14px; border: 1px solid var(--line, #d9dce3); border-radius: 10px; background: #f7f8fb; font-size: 13px; }
+.stored-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.stored-sources ul { list-style: none; margin: 10px 0 0; padding: 0; max-height: 150px; overflow: auto; }
+.stored-sources li { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-top: 1px solid #e6e8ee; }
+.stored-sources button { border: 0; background: none; color: #b42318; font-size: 12px; cursor: pointer; }
+.stored-sources button:disabled { opacity: .5; cursor: default; }
+.stored-sources .stored-clear { font-weight: 600; }
