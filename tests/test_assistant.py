@@ -66,7 +66,7 @@ def test_loop_runs_tools_returns_all_results_in_one_message_and_reports_evidence
                        _block("tool_use", id="t2", name="get_data_overview", input={})], "tool_use")
     final = _response([_block("text", text="Revenue was **X**.")], "end_turn")
     client = ScriptedClient(first, final)
-    out = agent.answer("What was our revenue last quarter?", [{"role": "user", "content": "hi"}], client=client)
+    out = agent.answer("What was our revenue last quarter?", [{"role": "user", "content": "hi"}], model="claude-opus-5-5", client=client)
     assert out["answer"] == "Revenue was **X**."
     assert [t["name"] for t in out["tools_used"]] == ["get_time_series", "get_data_overview"]
     assert out["visual"]["labels"] and out["evidence"]["verified_records"] > 0
@@ -78,7 +78,7 @@ def test_loop_runs_tools_returns_all_results_in_one_message_and_reports_evidence
 def test_tool_errors_are_reported_to_the_model_not_raised():
     bad = _response([_block("tool_use", id="t1", name="nope", input={})], "tool_use")
     client = ScriptedClient(bad, _response([_block("text", text="Sorry.")], "end_turn"))
-    out = agent.answer("q", client=client)
+    out = agent.answer("q", model="claude-opus-5-5", client=client)
     assert client.calls[1]["messages"][-1]["content"][0]["is_error"] is True
     assert out["answer"] == "Sorry."
 
@@ -88,4 +88,26 @@ def test_unsupported_model_and_missing_key(monkeypatch):
         agent.answer("q", model="gpt-4", client=ScriptedClient())
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(agent.AssistantUnavailable):
-        agent.answer("q")
+        agent.answer("q", model="claude-opus-5-5")
+
+
+def test_ollama_loop_uses_same_tools_and_reports_evidence():
+    replies = [
+        {"message": {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "get_time_series", "arguments": {"granularity": "quarterly"}}}]},
+         "prompt_eval_count": 100, "eval_count": 10},
+        {"message": {"role": "assistant", "content": "Revenue was **X**."}, "prompt_eval_count": 120, "eval_count": 8},
+    ]
+    sent = []
+
+    def fake_post(url, json, timeout):
+        sent.append(json)
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: replies.pop(0))
+
+    out = agent._answer_ollama("revenue last quarter?", [], "qwen3.5:9b", http=fake_post)
+    assert out["answer"] == "Revenue was **X**." and out["model"] == "ollama:qwen3.5:9b"
+    assert out["visual"]["labels"] and out["evidence"]["verified_records"] > 0
+    tool_msg = sent[1]["messages"][-1]
+    assert tool_msg["role"] == "tool" and tool_msg["tool_name"] == "get_time_series"
+    assert sent[0]["tools"][0]["type"] == "function" and sent[0]["think"] is False
+    assert out["usage"] == {"input_tokens": 220, "output_tokens": 18}

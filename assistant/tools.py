@@ -94,7 +94,8 @@ class DataAccess:
         total = sum(float(t["amount"]) for t in self.verified if t["kind"] == kind)
         return {
             "dimension": dimension, "kind": kind, "total": round(total, 2),
-            "rows": [{**r, "share_of_total": round(r["amount"] / total, 4) if total else None} for r in rows],
+            "rows": [{**r, "share_of_total": round(r["amount"] / total, 4) if total else None,
+                                    "share_display": f"{r['amount'] / total:.1%}" if total else "n/a"} for r in rows],
         }
 
     def find_transactions(
@@ -153,7 +154,8 @@ class DataAccess:
         rows = [
             {"label": label, current: round(v[current], 2), previous: round(v[previous], 2),
              "change": round(v[current] - v[previous], 2),
-             "change_pct": round((v[current] - v[previous]) / v[previous], 4) if v[previous] else None}
+             "change_pct": round((v[current] - v[previous]) / v[previous], 4) if v[previous] else None,
+             "change_percent_display": f"{(v[current] - v[previous]) / v[previous]:+.1%}" if v[previous] else "n/a (no prior revenue)"}
             for label, v in totals.items()
         ]
         rows.sort(key=lambda r: r["change"], reverse=True)

@@ -106,6 +106,7 @@ export function Home({ summary, reviewer, go }: { summary: Summary; reviewer: st
   const [busy, setBusy] = useState(false);
   const nextId = useRef(1);
   const chatting = messages.length > 0;
+  const modelReady = !status || !!status.models.find((m) => m.id === model)?.available;
   const threadEnd = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
 
@@ -142,15 +143,15 @@ export function Home({ summary, reviewer, go }: { summary: Summary; reviewer: st
     <form className="ask-box" onSubmit={(e) => { e.preventDefault(); void ask(question); }}>
         <input
           ref={input} value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={2000}
-          placeholder="Ask anything about your verified data…" aria-label="Ask EvoAssistant" disabled={status?.configured === false}
+          placeholder="Ask anything about your verified data…" aria-label="Ask EvoAssistant" disabled={!modelReady}
         />
         <div className="ask-row">
           <span className="source-chip">▤ Verified records only</span>
           <kbd>⌘K</kbd>
           <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model" disabled={!status}>
-            {status?.models.map((m) => <option key={m.id} value={m.id}>{m.label} — {m.note}</option>)}
+            {status?.models.map((m) => <option key={m.id} value={m.id} disabled={!m.available}>{m.label} — {m.available ? m.note : "needs API key"}</option>)}
           </select>
-          <button type="submit" className="send-button" disabled={busy || !question.trim() || status?.configured === false} aria-label="Ask">↑</button>
+          <button type="submit" className="send-button" disabled={busy || !question.trim() || !modelReady} aria-label="Ask">↑</button>
         </div>
       </form>
   );
@@ -197,14 +198,14 @@ export function Home({ summary, reviewer, go }: { summary: Summary; reviewer: st
 
       {!chatting && askForm}
 
-      {status && !status.configured && (
-        <div className="notice setup-notice">The assistant needs an Anthropic API key. {status.setup_hint}</div>
+      {status && !modelReady && model && (
+        <div className="notice setup-notice">This model is not available. {status.setup_hint}</div>
       )}
 
       {(
         <div className="suggestions">
           <span className="mono-muted">Suggestions:</span>
-          {SUGGESTIONS.map((s) => <button key={s} disabled={status?.configured === false} onClick={() => void ask(s)}>{s}</button>)}
+          {SUGGESTIONS.map((s) => <button key={s} disabled={!modelReady} onClick={() => void ask(s)}>{s}</button>)}
         </div>
       )}
 

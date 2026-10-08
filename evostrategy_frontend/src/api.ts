@@ -217,7 +217,7 @@ export type ScenarioResult = {
 };
 type CashPath = { ending_cash: number; runway_months: number | null; burning_cash: boolean };
 
-export type AssistantModel = { id: string; label: string; note: string };
+export type AssistantModel = { id: string; label: string; note: string; provider: "anthropic" | "ollama"; available: boolean };
 export type AssistantStatus = { configured: boolean; models: AssistantModel[]; default_model: string; setup_hint: string };
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 export type AssistantAnswer = {
