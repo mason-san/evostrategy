@@ -131,7 +131,7 @@ function IntelligencePanel() {
 
 type UploadFile = { file: File; name: string; size: string; type: string };
 
-function UploadScreen({ onBack, onNext, onDemo }: { onBack: () => void; onNext: (files: File[]) => Promise<void>; onDemo: () => Promise<void> }) {
+function UploadScreen({ onBack, onNext, onContinue, onDemo }: { onBack: () => void; onNext: (files: File[]) => Promise<void>; onContinue: () => void; onDemo: () => Promise<void> }) {
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [uploadError, setUploadError] = useState("");
@@ -171,6 +171,7 @@ function UploadScreen({ onBack, onNext, onDemo }: { onBack: () => void; onNext: 
 
   const submitFiles = async () => {
     if (!files.length) {
+      if (stored.length) { onContinue(); return; }   // nothing new to ingest: carry on with the documents already stored
       setUploadError("Add at least one document before continuing.");
       return;
     }
@@ -249,7 +250,7 @@ function UploadScreen({ onBack, onNext, onDemo }: { onBack: () => void; onNext: 
           <button className="back-button" onClick={onBack}>
             <span className="back-chevron">←</span> Back
           </button>
-          <button className="next-button" onClick={submitFiles} disabled={!files.length}>
+          <button className="next-button" onClick={submitFiles} disabled={!files.length && !stored.length}>
             Next <Icon name="arrow" size={18} />
           </button>
         </div>
@@ -486,6 +487,7 @@ export function App() {
     return <UploadScreen
       onBack={() => setScreen("welcome")}
       onNext={async (files) => startJob(await api.uploadDocuments(files))}
+      onContinue={() => setScreen("ready")}
       onDemo={async () => startJob(await api.loadDemo())}
     />;
   }
