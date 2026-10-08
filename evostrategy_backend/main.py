@@ -5,6 +5,7 @@ Workspace        GET  /api/summary, /api/documents, /api/documents/{id}, page im
 Verification     GET  /api/cases, /api/cases/{id}; POST /api/cases/{id}/review; GET /api/audit
 Analytics        GET  /api/analytics/overview, /api/forecast, /api/forecast/snapshots,
                       /api/runway; POST /api/whatif
+Assistant        GET  /api/assistant/status; POST /api/assistant/chat (Claude + verified-data tools)
 Settings         GET/PUT /api/settings (budgets, cash balance, headcount)
 Evaluation       GET  /api/metrics, /api/audit/verify
 Admin            POST /api/reconcile, POST /api/reset
@@ -31,6 +32,9 @@ from analytics.verified import load_transactions, verified_transactions
 from analytics.whatif import Scenario, simulate
 from analytics.aggregates import monthly_series
 from analytics.finance import data_sources, runway
+import anthropic
+
+from assistant import agent as assistant_agent
 from ingestion.service import SUPPORTED_TYPES
 from storage import registry
 from utils.config import DEFAULT_FORECAST_HORIZON, DEMO_DATA_DIR, PROJECT_ROOT, UPLOAD_DIR
@@ -38,7 +42,7 @@ from utils.config import DEFAULT_FORECAST_HORIZON, DEMO_DATA_DIR, PROJECT_ROOT, 
 from . import workspace
 from .ingestion_service import initial_steps, process_demo_job, process_job
 from .job_store import JobStore
-from .models import IngestionJob, ReviewRequest, ScenarioRequest, SettingsRequest
+from .models import AssistantRequest, IngestionJob, ReviewRequest, ScenarioRequest, SettingsRequest
 
 FRONTEND_DIST = PROJECT_ROOT / "evostrategy_frontend" / "dist"
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -289,6 +293,38 @@ def get_runway() -> dict:
 def run_whatif(request: ScenarioRequest) -> dict:
     return simulate(verified_transactions(), Scenario(**request.model_dump()),
                     budgets=_budgets(), finance=_finance())
+
+
+# --------------------------------------------------------------------------- assistant
+
+@app.get("/api/assistant/status")
+def assistant_status() -> dict:
+    return assistant_agent.status()
+
+
+@app.post("/api/assistant/chat")
+def assistant_chat(request: AssistantRequest) -> dict:
+    """Answer a question with Claude, grounded in read-only tools over verified data."""
+    if not verified_transactions():
+        raise HTTPException(status_code=409, detail="No verified data yet. Load documents and finish reconciliation first.")
+    try:
+        return assistant_agent.answer(
+            request.question,
+            [turn.model_dump() for turn in request.history],
+            request.model,
+        )
+    except assistant_agent.AssistantUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"The assistant is not configured. {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except anthropic.AuthenticationError as exc:
+        raise HTTPException(status_code=502, detail="Anthropic rejected the API key. Check ANTHROPIC_API_KEY.") from exc
+    except anthropic.RateLimitError as exc:
+        raise HTTPException(status_code=429, detail="Anthropic rate limit reached. Try again in a moment.") from exc
+    except anthropic.APIConnectionError as exc:
+        raise HTTPException(status_code=503, detail="Could not reach the Anthropic API.") from exc
+    except anthropic.APIStatusError as exc:
+        raise HTTPException(status_code=502, detail=f"Anthropic API error ({exc.status_code}): {exc.message}") from exc
 
 
 @app.get("/api/settings")

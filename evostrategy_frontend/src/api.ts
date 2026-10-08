@@ -217,6 +217,20 @@ export type ScenarioResult = {
 };
 type CashPath = { ending_cash: number; runway_months: number | null; burning_cash: boolean };
 
+export type AssistantModel = { id: string; label: string; note: string };
+export type AssistantStatus = { configured: boolean; models: AssistantModel[]; default_model: string; setup_hint: string };
+export type ChatTurn = { role: "user" | "assistant"; content: string };
+export type AssistantAnswer = {
+  answer: string;
+  model: string;
+  tools_used: Array<{ name: string; input: Record<string, unknown> }>;
+  visual: { title: string; labels: string[]; values: number[]; complete: boolean[] | null } | null;
+  supporting_transaction_ids: string[];
+  evidence: { verified_records: number; total_records: number; verified_rate: number | null; date_from: string | null; date_to: string | null; data_source?: DataSource };
+  usage: { input_tokens: number; output_tokens: number };
+  request_id: string | null;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -262,6 +276,9 @@ export const api = {
   settings: () => request<Settings>("/api/settings"),
   saveSettings: (body: Partial<{ budgets: Record<string, number>; finance: Partial<FinanceSettings> }>) =>
     request<Settings>("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  assistantStatus: () => request<AssistantStatus>("/api/assistant/status"),
+  ask: (question: string, history: ChatTurn[], model?: string) =>
+    request<AssistantAnswer>("/api/assistant/chat", json({ question, history, model })),
   metrics: () => request<Metrics>("/api/metrics"),
   auditChain: () => request<AuditChain>("/api/audit/verify"),
 };

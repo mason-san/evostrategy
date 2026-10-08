@@ -68,3 +68,16 @@ class SettingsRequest(BaseModel):
 
     budgets: dict[str, float] | None = None
     finance: FinanceSettings | None = None
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=8000)
+
+
+class AssistantRequest(BaseModel):
+    """A question for EvoAssistant plus the visible conversation so far."""
+
+    question: str = Field(min_length=1, max_length=2000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=40)
+    model: str | None = None

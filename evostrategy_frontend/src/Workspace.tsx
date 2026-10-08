@@ -7,10 +7,12 @@ import {
   type Overview as OverviewData, type ReviewAction, type ScenarioInput, type ScenarioResult, type Summary,
 } from "./api";
 import { BarList, LineChart, Meter } from "./charts";
+import { Home } from "./Home";
 
-type View = "overview" | "review" | "documents" | "analytics" | "forecast" | "runway" | "whatif" | "audit" | "evaluation" | "settings";
+type View = "home" | "overview" | "review" | "documents" | "analytics" | "forecast" | "runway" | "whatif" | "audit" | "evaluation" | "settings";
 
 const NAV: Array<{ key: View; label: string; group: string }> = [
+  { key: "home", label: "Home", group: "Workspace" },
   { key: "overview", label: "Overview", group: "Workspace" },
   { key: "review", label: "Review queue", group: "Verification" },
   { key: "documents", label: "Documents", group: "Verification" },
@@ -645,6 +647,7 @@ function AuditView({ version }: { version: string }) {
 // --------------------------------------------------------------------------- shell
 
 const TITLES: Record<View, [string, string]> = {
+  home: ["Home", "Ask EvoAssistant — answers come only from verified records."],
   overview: ["Overview", "Your verified business at a glance."],
   review: ["Review queue", "Discrepancies the engine could not settle on its own. Your decision is final and audited."],
   documents: ["Documents", "Every extracted record, traceable to its source file."],
@@ -662,7 +665,7 @@ function readReviewer() {
 }
 
 export function Workspace({ onAddDocuments, onLoadDemo }: { onAddDocuments: () => void; onLoadDemo: () => void }) {
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>("home");
   const [reviewer, setReviewer] = useState(readReviewer);
   const { data: summary, error, reload } = useLoad(api.summary, []);
   useEffect(() => { try { window.localStorage.setItem("evostrategy.reviewer", reviewer); } catch { /* storage unavailable */ } }, [reviewer]);
@@ -696,10 +699,12 @@ export function Workspace({ onAddDocuments, onLoadDemo }: { onAddDocuments: () =
         </div>
       </nav>
       <main className="workspace-main">
-        <header className="workspace-head">
-          <div><h1>{title}</h1><p>{subtitle}</p></div>
-          {summary && <div className="head-meta mono-muted">{summary.documents} documents · {summary.transactions} transactions</div>}
-        </header>
+        {view !== "home" && (
+          <header className="workspace-head">
+            <div><h1>{title}</h1><p>{subtitle}</p></div>
+            {summary && <div className="head-meta mono-muted">{summary.documents} documents · {summary.transactions} transactions</div>}
+          </header>
+        )}
         {!summary && <Loading error={error} />}
         {summary && !summary.has_data && (
           <section className="card empty-state">
@@ -711,6 +716,7 @@ export function Workspace({ onAddDocuments, onLoadDemo }: { onAddDocuments: () =
             </div>
           </section>
         )}
+        {summary?.has_data && view === "home" && <Home summary={summary} reviewer={reviewer} go={setView} />}
         {summary?.has_data && view === "overview" && <OverviewView summary={summary} go={setView} />}
         {summary?.has_data && view === "review" && <ReviewView reviewer={reviewer} onChanged={reload} />}
         {summary?.has_data && view === "documents" && <DocumentsView />}
