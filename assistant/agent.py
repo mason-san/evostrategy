@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import asdict
 from typing import Any
 
 import anthropic
@@ -116,7 +117,11 @@ def _trim(history: list[dict[str, str]]) -> list[dict[str, Any]]:
 
 
 def _finish(data: DataAccess, text: str, model: str, usage: dict[str, int], request_id: str | None) -> dict[str, Any]:
+    desk: dict[str, Any] = {}
+    if hasattr(data, "scenario"):   # what-if desk: hand the final levers and numbers back to the screen
+        desk = {"scenario": asdict(data.scenario), "simulation": data.simulation}
     return {
+        **desk,
         "answer": text or "I did not get an answer back. Please try again.",
         "model": model,
         "tools_used": data.tools_used,
@@ -128,20 +133,26 @@ def _finish(data: DataAccess, text: str, model: str, usage: dict[str, int], requ
     }
 
 
+def _setup(data: DataAccess | None) -> tuple[DataAccess, str, list[dict[str, Any]]]:
+    """The data snapshot, system prompt and tool list for one question (a session may extend them)."""
+    data = data or DataAccess()
+    return data, SYSTEM_PROMPT + getattr(data, "system_extra", ""), getattr(data, "tool_definitions", TOOL_DEFINITIONS)
+
+
 def answer(question: str, history: list[dict[str, str]] | None = None, model: str | None = None,
-           client: anthropic.Anthropic | None = None) -> dict[str, Any]:
+           client: anthropic.Anthropic | None = None, session: DataAccess | None = None) -> dict[str, Any]:
     model = model or status()["default_model"]
     if model.startswith(OLLAMA_PREFIX) and len(model) > len(OLLAMA_PREFIX):
-        return _answer_ollama(question, history or [], model[len(OLLAMA_PREFIX):])
+        return _answer_ollama(question, history or [], model[len(OLLAMA_PREFIX):], session=session)
     if model not in {m["id"] for m in ANTHROPIC_MODELS}:
         raise ValueError(f"Unsupported model: {model}")
-    return _answer_anthropic(question, history or [], model, client)
+    return _answer_anthropic(question, history or [], model, client, session)
 
 
 def _answer_anthropic(question: str, history: list[dict[str, str]], model: str,
-                      client: anthropic.Anthropic | None) -> dict[str, Any]:
+                      client: anthropic.Anthropic | None, session: DataAccess | None = None) -> dict[str, Any]:
     client = client or _client()
-    data = DataAccess()
+    data, system, tools = _setup(session)
     messages: list[dict[str, Any]] = _trim(history) + [{"role": "user", "content": question}]
     usage = {"input_tokens": 0, "output_tokens": 0}
     text, request_id, stop = "", None, None
@@ -150,8 +161,8 @@ def _answer_anthropic(question: str, history: list[dict[str, str]], model: str,
         response = client.messages.create(
             model=model,
             max_tokens=16000,
-            system=SYSTEM_PROMPT,
-            tools=TOOL_DEFINITIONS,
+            system=system,
+            tools=tools,
             messages=messages,
             output_config={"effort": "medium"},
             cache_control={"type": "ephemeral"},
@@ -184,23 +195,24 @@ def _answer_anthropic(question: str, history: list[dict[str, str]], model: str,
     return _finish(data, text, model, usage, request_id)
 
 
-def _ollama_tools() -> list[dict[str, Any]]:
+def _ollama_tools(tools: list[dict[str, Any]] = TOOL_DEFINITIONS) -> list[dict[str, Any]]:
     return [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}}
-            for t in TOOL_DEFINITIONS]
+            for t in tools]
 
 
-def _answer_ollama(question: str, history: list[dict[str, str]], name: str, http: Any = None) -> dict[str, Any]:
+def _answer_ollama(question: str, history: list[dict[str, str]], name: str, http: Any = None,
+                   session: DataAccess | None = None) -> dict[str, Any]:
     """Same tool loop against a local model through Ollama's /api/chat."""
     post = http or httpx.post
-    data = DataAccess()
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}] + _trim(history) + [{"role": "user", "content": question}]
+    data, system, tools = _setup(session)
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}] + _trim(history) + [{"role": "user", "content": question}]
     usage = {"input_tokens": 0, "output_tokens": 0}
     text = ""
 
     for _ in range(MAX_STEPS):
         try:
             reply = post(f"{OLLAMA_URL}/api/chat", timeout=OLLAMA_TIMEOUT, json={
-                "model": name, "messages": messages, "tools": _ollama_tools(), "stream": False, "think": False,
+                "model": name, "messages": messages, "tools": _ollama_tools(tools), "stream": False, "think": False,
                 "options": {"num_ctx": OLLAMA_NUM_CTX, "temperature": 0.2},
             })
             reply.raise_for_status()

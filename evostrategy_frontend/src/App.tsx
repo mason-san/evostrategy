@@ -15,6 +15,7 @@ const documentTags: Array<{ label: string; icon: IconName }> = [
 
 const intelligenceTags = ["Verified data", "Business intelligence", "Insights", "Forecasts", "Strategic plans"];
 
+//This is where the icons will be generated using a switch case. 
 function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (name) {
@@ -61,6 +62,7 @@ function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   }
 }
 
+//This is the header section. 
 function Brand({ setupStep }: { setupStep?: 2 | 3 }) {
   return (
     <header className="topbar">
@@ -83,6 +85,7 @@ function Brand({ setupStep }: { setupStep?: 2 | 3 }) {
   );
 }
 
+//The document upload panel.
 function DocumentPanel() {
   return (
     <section className="diagram-panel">

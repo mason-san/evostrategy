@@ -1,5 +1,7 @@
+//Explaining the port that the frontend has to take.
 export const API_BASE_URL: string =
   import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "" : "http://127.0.0.1:8000");
+
 
 export type PipelineStep = { key: string; label: string; detail: string; state: "pending" | "active" | "complete" | "failed" };
 export type IngestionJob = {
@@ -215,6 +217,7 @@ export type ScenarioResult = {
   budget: { annual_budget: number | null; budget_source: string; window_budget: number | null; baseline_consumption: number | null; scenario_consumption: number | null };
   runway: { configured: boolean; starting_cash: number | null; baseline: CashPath | null; scenario: CashPath | null };
 };
+export type WhatIfAnswer = AssistantAnswer & { scenario: ScenarioInput; simulation: ScenarioResult | null };
 type CashPath = { ending_cash: number; runway_months: number | null; burning_cash: boolean };
 
 export type AssistantModel = { id: string; label: string; note: string; provider: "anthropic" | "ollama"; available: boolean };
@@ -278,6 +281,8 @@ export const api = {
   overview: () => request<Overview>("/api/analytics/overview"),
   forecast: (metric: string, horizon: number) => request<Forecast>(`/api/forecast?metric=${metric}&horizon=${horizon}`),
   whatif: (input: ScenarioInput) => request<ScenarioResult>("/api/whatif", json(input)),
+  whatifAssistant: (question: string, scenario: ScenarioInput, history: ChatTurn[], model?: string) =>
+    request<WhatIfAnswer>("/api/whatif/assistant", json({ question, scenario, history, model })),
   runway: () => request<Runway>("/api/runway"),
   settings: () => request<Settings>("/api/settings"),
   saveSettings: (body: Partial<{ budgets: Record<string, number>; finance: Partial<FinanceSettings> }>) =>

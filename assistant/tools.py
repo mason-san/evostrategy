@@ -8,6 +8,8 @@ number that a reviewer has not settled. Nothing here writes to the registry.
 from __future__ import annotations
 
 import inspect
+import json
+from dataclasses import asdict, replace
 from typing import Any, Callable
 
 from analytics.aggregates import breakdown, budget_consumption, monthly_series
@@ -299,3 +301,116 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {"name": "get_review_queue", "description": "Open reconciliation discrepancies awaiting a human. Use to explain why a number might change or what needs attention.",
      "input_schema": _schema({"limit": {"type": "integer", "description": "Cases to return (1-30)."}})},
 ]
+
+
+# Slider ranges of the What-if tab; the desk clamps to these so the screen can always show what was set.
+LEVER_LIMITS: dict[str, tuple[float, float]] = {
+    "volume_change_pct": (-30, 30), "pricing_adjustment_pct": (-20, 20), "price_elasticity": (0, 2),
+    "headcount_change": (-10, 10), "vendor_consolidation_pct": (0, 30), "other_cost_change_pct": (-20, 20),
+}
+HORIZONS = (3, 6, 12)
+
+
+class WhatIfDesk(DataAccess):
+    """Data access for the What-if tab's assistant: it can also move the scenario levers on screen.
+
+    ``set_scenario`` changes only the levers it is given, re-runs the real simulation and remembers
+    the final scenario so the UI can show the same sliders and numbers. Nothing is stored.
+    """
+
+    def __init__(self, scenario: Scenario) -> None:
+        super().__init__()
+        self.scenario = scenario
+        self.simulation: dict[str, Any] | None = None
+
+    @property
+    def system_extra(self) -> str:
+        return (
+            "\n\nYou are embedded in the What-if tab, next to the scenario sliders, and you can move them with "
+            "set_scenario. When the user describes a decision (\"hire 3 people\", \"raise prices 8%\", \"what if sales drop\"), "
+            "call set_scenario with only the levers that decision changes, then report profit, revenue, expense and runway "
+            "from its result. Always compare with baseline. Levers are relative to the baseline forecast, not to last month. "
+            "Slider limits: volume -30..30%, pricing -20..20%, elasticity 0..2, headcount -10..10 people, vendor savings "
+            "0..30%, other cost -20..20%, horizon 3/6/12 months; values beyond them are clamped and the result says so, so "
+            "tell the user when a move was capped. State the assumptions you chose (e.g. default elasticity). "
+            "Current scenario on screen: " + json.dumps(asdict(self.scenario)) + "."
+        )
+
+    @property
+    def tool_definitions(self) -> list[dict[str, Any]]:
+        return [t for t in TOOL_DEFINITIONS if t["name"] != "run_what_if"] + [SET_SCENARIO_TOOL]
+
+    def _dispatch(self) -> dict[str, Callable[..., Any]]:
+        return {**super()._dispatch(), "set_scenario": self.set_scenario}
+
+    def set_scenario(
+        self, horizon: int | None = None, volume_change_pct: float | None = None,
+        pricing_adjustment_pct: float | None = None, price_elasticity: float | None = None,
+        headcount_change: int | None = None, vendor_consolidation_pct: float | None = None,
+        other_cost_change_pct: float | None = None, reset: bool = False,
+    ) -> dict[str, Any]:
+        current = self.scenario
+        if reset:
+            current = Scenario(horizon=current.horizon, baseline_headcount=current.baseline_headcount)
+        requested = {
+            "horizon": horizon, "volume_change_pct": volume_change_pct, "pricing_adjustment_pct": pricing_adjustment_pct,
+            "price_elasticity": price_elasticity, "headcount_change": headcount_change,
+            "vendor_consolidation_pct": vendor_consolidation_pct, "other_cost_change_pct": other_cost_change_pct,
+        }
+        changes: dict[str, Any] = {}
+        capped: list[str] = []
+        for name, value in requested.items():
+            if value is None:
+                continue
+            if name == "horizon":
+                changes[name] = min(HORIZONS, key=lambda h: abs(h - int(value)))
+                continue
+            low, high = LEVER_LIMITS[name]
+            clamped = max(low, min(high, float(value)))
+            if clamped != float(value):
+                capped.append(f"{name} {value:g} capped to {clamped:g}")
+            changes[name] = int(round(clamped)) if name == "headcount_change" else round(clamped, 2)
+        self.scenario = replace(current, **changes)
+        result = simulate(self.verified, self.scenario, budgets=self.budgets, finance=self.finance)
+        if "error" in result:
+            return result
+        self.simulation = result
+        totals, budget = result["totals"], result["budget"]
+
+        def pct(value: float | None, signed: bool = False) -> str:
+            return "n/a" if value is None else f"{value:{'+' if signed else ''}.1%}"
+
+        base_profit = totals["baseline"]["profit"]
+        return {
+            "applied_scenario": asdict(self.scenario),
+            "capped": capped,
+            "warnings": ([] if result["assumptions"]["monthly_cost_per_head"] or not self.scenario.headcount_change else [
+                "The verified expenses contain no payroll/salary category, so a headcount change adds no cost in this simulation. "
+                "Tell the user this; it is not something they can fix in Settings."]),
+            "assumptions": result["assumptions"],
+            "totals": totals,
+            "profit_change_display": pct(totals["delta"]["profit"] / abs(base_profit), True) if base_profit else "n/a (baseline profit is zero)",
+            "budget": {**budget, "baseline_consumption_display": pct(budget["baseline_consumption"]),
+                       "scenario_consumption_display": pct(budget["scenario_consumption"])},
+            "runway": result["runway"],
+            "monthly_profit": [{"month": r["month"], "baseline": r["baseline"]["profit"], "scenario": r["scenario"]["profit"]}
+                               for r in result["months"]],
+        }
+
+
+SET_SCENARIO_TOOL: dict[str, Any] = {
+    "name": "set_scenario",
+    "description": "Move the What-if sliders on the user's screen and run the simulation on the verified baseline forecast "
+                   "(nothing is saved). Only the levers you pass are changed; the rest keep their current value. Percentages "
+                   "are whole numbers (10 = +10%). Returns baseline vs scenario revenue, expense and profit, budget use and cash runway.",
+    "input_schema": {"type": "object", "additionalProperties": False, "required": [], "properties": {
+        "horizon": {"type": "integer", "enum": list(HORIZONS), "description": "Months to simulate."},
+        "volume_change_pct": {"type": "number", "description": "Sales volume change, -30..30."},
+        "pricing_adjustment_pct": {"type": "number", "description": "Price change, -20..20; volume reacts via elasticity."},
+        "price_elasticity": {"type": "number", "description": "0..2; 0.5 is the default assumption."},
+        "headcount_change": {"type": "integer", "description": "People added (+) or removed (-), -10..10."},
+        "vendor_consolidation_pct": {"type": "number", "description": "Savings on non-payroll spend, 0..30."},
+        "other_cost_change_pct": {"type": "number", "description": "Other across-the-board cost change, -20..20."},
+        "reset": {"type": "boolean", "description": "Set every lever back to zero (default elasticity) before applying the others."},
+    }},
+}

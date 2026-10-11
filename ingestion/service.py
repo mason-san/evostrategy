@@ -111,8 +111,7 @@ def ingest_file(path: Path) -> list[SourceDocument]:
         images = [path]
     ocr = ocr_pages(images)
     second = (ocr.second_opinion or {}).get("text")
-    extraction, method = parse_document(ocr.text, ocr.confidence, ocr_words=ocr.words,
-                                        second_opinion_text=second)
+    extraction, method = parse_document(ocr.text, ocr.confidence, ocr_words=ocr.words, second_opinion_text=second)
     document = _build(
         path.stem,
         path,
