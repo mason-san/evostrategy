@@ -156,3 +156,42 @@ def test_chat_endpoint_saves_exchange_and_failures(monkeypatch):
     assert saved["messages"][-1]["error"] and len(saved["messages"]) == 6
     assert client.post("/api/assistant/chat", json={"question": "x", "conversation_id": "missing"}).status_code == 404
     assert client.delete(f"/api/chats/{first['conversation_id']}").status_code == 200
+
+
+def test_whatif_desk_moves_levers_clamps_and_matches_simulate():
+    from analytics.whatif import Scenario, simulate
+    from assistant.tools import WhatIfDesk
+
+    desk = WhatIfDesk(Scenario())
+    assert "set_scenario" in {t["name"] for t in desk.tool_definitions} and "run_what_if" not in {t["name"] for t in desk.tool_definitions}
+    out = desk.run("set_scenario", {"pricing_adjustment_pct": 50, "headcount_change": 3})
+    assert desk.scenario.pricing_adjustment_pct == 20 and desk.scenario.headcount_change == 3
+    assert out["capped"] == ["pricing_adjustment_pct 50 capped to 20"]
+    expected = simulate(desk.verified, desk.scenario, budgets=desk.budgets, finance=desk.finance)
+    assert out["totals"] == expected["totals"] and desk.simulation["totals"] == expected["totals"]
+
+    desk.run("set_scenario", {"volume_change_pct": 10})          # partial update keeps earlier levers
+    assert desk.scenario.pricing_adjustment_pct == 20 and desk.scenario.volume_change_pct == 10
+    desk.run("set_scenario", {"reset": True, "horizon": 12})
+    assert desk.scenario.pricing_adjustment_pct == 0 and desk.scenario.horizon == 12
+
+
+def test_whatif_assistant_endpoint_returns_final_scenario(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from evostrategy_backend.main import app
+
+    run_demo()
+    seen = {}
+
+    def fake_answer(question, history, model, session=None):
+        seen["scenario"] = session.scenario.headcount_change
+        session.run("set_scenario", {"headcount_change": 2})
+        return agent._finish(session, "Hired 2.", "x", {}, None)
+
+    monkeypatch.setattr(agent, "answer", fake_answer)
+    body = {"question": "hire 2", "scenario": {"headcount_change": 1, "baseline_headcount": 20},
+            "history": [{"role": "user", "content": "hi"}]}
+    out = TestClient(app).post("/api/whatif/assistant", json=body).json()
+    assert seen["scenario"] == 1 and out["scenario"]["headcount_change"] == 2 and out["scenario"]["baseline_headcount"] == 20
+    assert out["simulation"]["totals"]["delta"]["profit"] != 0

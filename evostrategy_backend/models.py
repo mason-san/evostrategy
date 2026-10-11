@@ -84,5 +84,14 @@ class AssistantRequest(BaseModel):
     conversation_id: str | None = None   # omit to start a new saved chat
 
 
+class WhatIfAssistantRequest(BaseModel):
+    """A message to the What-if assistant, with the levers currently on screen."""
+
+    question: str = Field(min_length=1, max_length=2000)
+    scenario: ScenarioRequest = Field(default_factory=ScenarioRequest)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=40)
+    model: str | None = None
+
+
 class RenameRequest(BaseModel):
     title: str = Field(min_length=1, max_length=120)

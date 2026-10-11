@@ -8,6 +8,7 @@ import {
 } from "./api";
 import { BarList, LineChart, Meter } from "./charts";
 import { Home } from "./Home";
+import { WhatIfAssistant } from "./WhatIfAssistant";
 
 type View = "home" | "overview" | "review" | "documents" | "analytics" | "forecast" | "runway" | "whatif" | "audit" | "evaluation" | "settings";
 
@@ -606,6 +607,7 @@ function WhatIfView({ version }: { version: string }) {
           </>
         )}
       </section>
+      <WhatIfAssistant input={input} onApply={setInput} />
     </div>
   );
 }

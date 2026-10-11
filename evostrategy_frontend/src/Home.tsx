@@ -58,7 +58,7 @@ function greeting(name: string) {
 }
 
 /** Minimal inline renderer: paragraphs, "- " bullets and **bold** only. */
-function RichText({ text }: { text: string }) {
+export function RichText({ text }: { text: string }) {
   const inline = (line: string) => line.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
     part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2, -2)}</strong> : part);
   const blocks: Array<{ bullets: boolean; lines: string[] }> = [];

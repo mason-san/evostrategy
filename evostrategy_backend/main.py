@@ -36,6 +36,7 @@ from analytics.finance import data_sources, runway
 import anthropic
 
 from assistant import agent as assistant_agent
+from assistant.tools import WhatIfDesk
 from ingestion.service import SUPPORTED_TYPES
 from storage import chats, registry
 from utils.config import DEFAULT_FORECAST_HORIZON, DEMO_DATA_DIR, PROJECT_ROOT, UPLOAD_DIR
@@ -43,7 +44,9 @@ from utils.config import DEFAULT_FORECAST_HORIZON, DEMO_DATA_DIR, PROJECT_ROOT, 
 from . import workspace
 from .ingestion_service import _PIPELINE_LOCK, initial_steps, process_demo_job, process_job
 from .job_store import JobStore
-from .models import AssistantRequest, RenameRequest, IngestionJob, ReviewRequest, ScenarioRequest, SettingsRequest
+from .models import (
+    AssistantRequest, IngestionJob, RenameRequest, ReviewRequest, ScenarioRequest, SettingsRequest, WhatIfAssistantRequest,
+)
 
 FRONTEND_DIST = PROJECT_ROOT / "evostrategy_frontend" / "dist"
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -334,6 +337,18 @@ def _assistant_error(exc: Exception) -> HTTPException:
     raise exc
 
 
+@app.post("/api/whatif/assistant")
+def whatif_assistant(request: WhatIfAssistantRequest) -> dict:
+    """Talk to the What-if assistant. It may move the levers; the reply carries the final scenario and its
+    simulation so the screen shows exactly what the answer was computed from. Nothing is stored."""
+    try:
+        desk = WhatIfDesk(Scenario(**request.scenario.model_dump()))
+        history = [turn.model_dump() for turn in request.history]
+        return assistant_agent.answer(request.question, history, request.model, session=desk)
+    except Exception as exc:
+        raise _assistant_error(exc)
+
+
 @app.post("/api/assistant/chat")
 def assistant_chat(request: AssistantRequest) -> dict:
     """Answer a question with the chosen model, grounded in read-only tools over verified data.
@@ -457,6 +472,7 @@ def reset() -> dict:
 # --------------------------------------------------------------------------- frontend
 
 if FRONTEND_DIST.is_dir():
+    #This is what makes single-page app work.
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
