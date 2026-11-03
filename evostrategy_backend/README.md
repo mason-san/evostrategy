@@ -15,7 +15,7 @@ venv/bin/python -m uvicorn evostrategy_backend.main:app --reload --port 8000
 The frontend expects the service at `http://127.0.0.1:8000`. Set
 `VITE_API_URL` when the API runs elsewhere.
 
-## Use a local Ollama model
+## Use Ollama locally during development
 
 Start Ollama in another terminal and inspect the installed model name:
 
@@ -33,8 +33,11 @@ venv/bin/python -m uvicorn evostrategy_backend.main:app --reload --host 127.0.0.
 ```
 
 Ollama defaults to `http://127.0.0.1:11434`; override it with `OLLAMA_URL` if
-your local server uses another address. The Ollama response is required to be
-JSON and follows the same extraction contract as the Gemini parser.
+your local server uses another address. This local setup is only for
+development. In production, Render runs Ollama as a private service and the
+hosted backend receives its private `OLLAMA_URL`; users do not install or run
+Ollama on their laptops. The Ollama response is required to be JSON and follows
+the same extraction contract as the Gemini parser.
 
 ## API flow
 

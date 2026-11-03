@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: evostrategy
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: LLM_PROVIDER
+        value: ollama
+      - key: OLLAMA_MODEL
+        value: llama3.1:8b
+      - key: OLLAMA_URL
+        value: http://evostrategy-ollama:11434
+      - key: EVOSTRATEGY_DATA_DIR
+        value: /data
+      - key: CORS_ORIGINS
+        sync: false
+    disk:
+      name: evostrategy-data
+      mountPath: /data
+      sizeGB: 10
+
+  - type: pserv
+    name: evostrategy-ollama
+    runtime: image
+    plan: starter
+    image:
+      url: ollama/ollama:latest
+    dockerCommand: >-
+      sh -c 'ollama serve & pid=$$!; until ollama list >/dev/null 2>&1; do
+      sleep 2; done; ollama pull llama3.1:8b; wait "$$pid"'
+    healthCheckPath: /api/tags
+    envVars:
+      - key: OLLAMA_MODEL
+        value: llama3.1:8b
+      - key: OLLAMA_HOST
+        value: 0.0.0.0:11434
+    disk:
+      name: evostrategy-ollama-models
+      mountPath: /root/.ollama
+      sizeGB: 20
