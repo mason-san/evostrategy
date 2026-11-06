@@ -225,6 +225,7 @@ export type AssistantStatus = { configured: boolean; models: AssistantModel[]; d
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 export type AssistantAnswer = {
   answer: string;
+  answer_kind?: "business" | "document";
   model: string;
   tools_used: Array<{ name: string; input: Record<string, unknown> }>;
   visual: { title: string; labels: string[]; values: number[]; complete: boolean[] | null } | null;
@@ -232,6 +233,11 @@ export type AssistantAnswer = {
   evidence: { verified_records: number; total_records: number; verified_rate: number | null; date_from: string | null; date_to: string | null; data_source?: DataSource };
   usage: { input_tokens: number; output_tokens: number };
   request_id: string | null;
+  rag?: {
+    generation_status: "completed" | "no_retrieved_context" | "retrieval_error" | "generation_error" | string;
+    sources: Array<{ document_id: string; document_type?: string | null; source?: string | null }>;
+    retrieved_chunks: Array<{ chunk_id: string; document_id: string; document_type?: string | null; chunk_text: string; similarity_score?: number }>;
+  };
   conversation_id?: string;
 };
 export type ChatSummary = { id: string; title: string; created_at: string; updated_at: string; message_count: number };

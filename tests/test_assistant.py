@@ -106,6 +106,40 @@ def test_unsupported_model_and_missing_key(monkeypatch):
         agent.answer("q", model="gemini-2.5-pro")
 
 
+def test_document_question_uses_rag_and_preserves_sources(monkeypatch):
+    monkeypatch.setattr(agent.rag_generation, "answer_question", lambda question: {
+        "answer": "The total is $50.10.\n\nSource: invoice-001",
+        "model": "qwen3.5:9b",
+        "generation_status": "completed",
+        "sources": [{"document_id": "invoice-001", "source": "invoice001.pdf"}],
+        "retrieved_chunks": [{
+            "chunk_id": "chunk-1", "document_id": "invoice-001",
+            "document_type": "invoice", "chunk_text": "Total: $50.10",
+            "similarity_score": 0.94,
+        }],
+    })
+    result = agent.answer("What is the total amount on invoice 001?", model="gemini-2.5-pro")
+    assert result["answer_kind"] == "document"
+    assert result["answer"] == "The total is $50.10."
+    assert result["rag"]["sources"][0]["document_id"] == "invoice-001"
+    assert result["rag"]["retrieved_chunks"][0]["chunk_text"] == "Total: $50.10"
+
+
+def test_business_question_keeps_existing_model_path(monkeypatch):
+    called = {}
+
+    def fake_groq(question, history, model, client, session=None):
+        called["question"] = question
+        return {"answer": "verified business answer"}
+
+    monkeypatch.setattr(agent, "_answer_groq", fake_groq)
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "test")
+    result = agent.answer("What was our revenue last quarter?", model="llama-3.3-70b-versatile")
+    assert result["answer"] == "verified business answer"
+    assert called["question"] == "What was our revenue last quarter?"
+
+
 def test_chat_history_persists_and_survives_registry_reset():
     from storage import chats, registry
 
@@ -149,6 +183,35 @@ def test_chat_endpoint_saves_exchange_and_failures(monkeypatch):
     assert saved["messages"][-1]["error"] and len(saved["messages"]) == 6
     assert client.post("/api/assistant/chat", json={"question": "x", "conversation_id": "missing"}).status_code == 404
     assert client.delete(f"/api/chats/{first['conversation_id']}").status_code == 200
+
+
+def test_chat_endpoint_preserves_rag_sources_without_verified_transactions(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from evostrategy_backend import main
+
+    monkeypatch.setattr(main, "verified_transactions", lambda: [])
+    monkeypatch.setattr(agent, "answer", lambda q, h, m: {
+        "answer": "The invoice total is $50.10.",
+        "answer_kind": "document",
+        "model": "qwen3.5:9b",
+        "tools_used": [],
+        "visual": None,
+        "supporting_transaction_ids": [],
+        "evidence": {},
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+        "request_id": None,
+        "rag": {
+            "generation_status": "completed",
+            "sources": [{"document_id": "invoice-001", "source": "invoice001.pdf"}],
+            "retrieved_chunks": [{"chunk_id": "c1", "document_id": "invoice-001", "chunk_text": "Total: $50.10"}],
+        },
+    })
+    response = TestClient(main.app).post("/api/assistant/chat", json={"question": "What is the total on invoice 001?"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer_kind"] == "document"
+    assert body["rag"]["sources"][0]["document_id"] == "invoice-001"
 
 
 def test_whatif_desk_moves_levers_clamps_and_matches_simulate():

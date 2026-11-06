@@ -45,6 +45,12 @@
 .verified-line i { background: #15803d; border-radius: 50%; display: inline-block; height: 7px; margin-right: 6px; width: 7px; }
 .verified-line em { background: #fff7e6; border-radius: 4px; color: #92400e; font-style: normal; margin-left: .6rem; padding: 1px 6px; }
 .tools-line { color: #777587; flex-basis: 100%; font: 11.5px "JetBrains Mono", monospace; }
+.rag-sources { border-top: 1px solid #eef0f6; margin-top: 1rem; padding-top: .8rem; }
+.rag-sources > strong { color: #3525cd; display: block; font-size: 12px; margin-bottom: .45rem; }
+.rag-source { border: 1px solid #e2e2eb; border-radius: 8px; margin-top: .4rem; }
+.rag-source-toggle { align-items: center; background: transparent; border: 0; color: #25233a; cursor: pointer; display: flex; font: 500 12px "JetBrains Mono", monospace; justify-content: space-between; padding: .55rem .7rem; text-align: left; width: 100%; }
+.rag-source-toggle small { color: #777587; font: 11px "Geist", sans-serif; }
+.rag-excerpt { background: #fafaff; border-top: 1px solid #eef0f6; color: #55536a; font-size: 12px; line-height: 1.45; margin: 0; padding: .65rem .7rem; white-space: pre-wrap; }
 .thinking { align-items: center; color: #777587; display: flex; font: 500 13px "JetBrains Mono", monospace; gap: 5px; }
 .thinking span { animation: pulse 1s infinite; background: #4f46e5; border-radius: 50%; height: 6px; width: 6px; }
 .thinking span:nth-child(2) { animation-delay: .15s; }

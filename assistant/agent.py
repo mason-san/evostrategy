@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from utils.config import PROJECT_ROOT
 
 from .tools import TOOL_DEFINITIONS, DataAccess
+from rag import generation as rag_generation
 
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -29,6 +30,11 @@ GROQ_MODELS: list[dict[str, str]] = [
 MAX_STEPS = 8
 MAX_TOOL_CHARS = 40_000
 MAX_HISTORY_TURNS = 12
+
+_DOCUMENT_TERMS = (
+    "invoice", "invoices", "document", "documents", "uploaded", "receipt", "receipts",
+    "bill", "bills", "payment terms", "purchase order", "supplier",
+)
 
 SYSTEM_PROMPT = """You are EvoAssistant, the question-answering layer of EvoStrategy, a system that ingests a company's \
 documents (invoices, payments, ledgers), reconciles them against each other, has a human review the discrepancies, and \
@@ -55,6 +61,55 @@ Use **bold** for key figures. Plain text only: no headings, tables or emoji. Be 
 
 class AssistantUnavailable(RuntimeError):
     """Raised when the configured LLM provider cannot be used."""
+
+
+def is_document_question(question: str) -> bool:
+    """Return whether a question explicitly asks about uploaded documents."""
+    normalized = question.casefold()
+    return any(term in normalized for term in _DOCUMENT_TERMS)
+
+
+def _without_source_section(answer: str) -> str:
+    """Keep generated source attribution in structured fields, not answer prose."""
+    lines = answer.splitlines()
+    kept: list[str] = []
+    for line in lines:
+        if line.strip().casefold() in {"source:", "sources:", "source"} or line.strip().casefold().startswith(("source:", "sources:")):
+            break
+        kept.append(line)
+    return "\n".join(kept).strip() or answer
+
+
+def _answer_rag(question: str) -> dict[str, Any]:
+    """Run the Step 6 grounded generator and adapt it to the assistant contract."""
+    result = rag_generation.answer_question(question)
+    chunks = [
+        {
+            "chunk_id": chunk.get("chunk_id"),
+            "document_id": chunk.get("document_id"),
+            "document_type": chunk.get("document_type"),
+            "chunk_text": str(chunk.get("chunk_text") or "")[:1600],
+            "similarity_score": chunk.get("similarity_score"),
+        }
+        for chunk in result.get("retrieved_chunks", [])
+    ]
+    evidence = DataAccess().evidence()
+    return {
+        "answer": _without_source_section(str(result.get("answer") or "")),
+        "answer_kind": "document",
+        "model": result.get("model", ""),
+        "tools_used": [],
+        "visual": None,
+        "supporting_transaction_ids": [],
+        "evidence": evidence,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+        "request_id": None,
+        "rag": {
+            "generation_status": result.get("generation_status"),
+            "sources": result.get("sources", []),
+            "retrieved_chunks": chunks,
+        },
+    }
 
 
 def status() -> dict[str, Any]:
@@ -152,6 +207,8 @@ def answer(question: str, history: list[dict[str, str]] | None = None, model: st
         ollama_model = os.environ.get("OLLAMA_MODEL", "").strip()
         if model not in {configured_model, ollama_model}:
             raise ValueError(f"Unsupported model: {model}")
+    if session is None and is_document_question(question):
+        return _answer_rag(question)
     if client is None and model in legacy_models:
         raise AssistantUnavailable(status()["setup_hint"])
     if client is not None and hasattr(client, "models"):

@@ -352,7 +352,7 @@ def assistant_chat(request: AssistantRequest) -> dict:
     The exchange is saved to the conversation (a new one when no id is given), so
     chats survive refreshes and restarts; failures are saved as error messages.
     """
-    if not verified_transactions():
+    if not verified_transactions() and not assistant_agent.is_document_question(request.question):
         raise HTTPException(status_code=409, detail="No verified data yet. Load documents and finish reconciliation first.")
     if request.conversation_id:
         if chats.get(request.conversation_id) is None:

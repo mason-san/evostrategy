@@ -96,6 +96,7 @@ function Trajectory({ visual }: { visual: NonNullable<AssistantAnswer["visual"]>
 
 function AssistantMessage({ message, go }: { message: Extract<Message, { role: "assistant" }>; go: (view: "documents") => void }) {
   const [copied, setCopied] = useState(false);
+  const [expandedSource, setExpandedSource] = useState<string | null>(null);
   const r = message.result;
   const copy = () => {
     void navigator.clipboard?.writeText(message.text).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500); });
@@ -109,14 +110,37 @@ function AssistantMessage({ message, go }: { message: Extract<Message, { role: "
         {!message.error && <button className="ghost-button" onClick={copy}>{copied ? "Copied" : "Copy"}</button>}
       </header>
       {message.error ? <p className="answer-error">{message.error}</p> : <div className="answer-body"><RichText text={message.text} /></div>}
+      {r?.rag?.sources && r.rag.sources.length > 0 && (
+        <section className="rag-sources" aria-label="Source documents">
+          <strong>Source documents</strong>
+          {r.rag.sources.map((source) => {
+            const excerpts = r.rag?.retrieved_chunks.filter((chunk) => chunk.document_id === source.document_id) ?? [];
+            const open = expandedSource === source.document_id;
+            return (
+              <div className="rag-source" key={source.document_id}>
+                <button className="rag-source-toggle" onClick={() => setExpandedSource(open ? null : source.document_id)} aria-expanded={open}>
+                  <span>{source.source || source.document_id}</span><small>{open ? "Hide excerpt" : "Show excerpt"}</small>
+                </button>
+                {open && excerpts.map((chunk) => <p className="rag-excerpt" key={chunk.chunk_id}>{chunk.chunk_text}</p>)}
+              </div>
+            );
+          })}
+        </section>
+      )}
       {r?.visual && <Trajectory visual={r.visual} />}
       {r && (
         <footer>
-          <span className="verified-line">
-            <i />✓ Verified with {r.evidence.verified_records.toLocaleString()} transaction records · {percent(r.evidence.verified_rate)} reconciled
-            {r.evidence.data_source?.is_demo && <em>demo data</em>}
-          </span>
-          <button className="link-button" onClick={() => go("documents")}>View supporting records →</button>
+          {r.answer_kind === "document" ? (
+            <span className="verified-line"><i />✓ Grounded in retrieved uploaded documents</span>
+          ) : (
+            <>
+              <span className="verified-line">
+                <i />✓ Verified with {r.evidence.verified_records.toLocaleString()} transaction records · {percent(r.evidence.verified_rate)} reconciled
+                {r.evidence.data_source?.is_demo && <em>demo data</em>}
+              </span>
+              <button className="link-button" onClick={() => go("documents")}>View supporting records →</button>
+            </>
+          )}
           {r.tools_used.length > 0 && (
             <span className="tools-line" title="Read-only queries the model ran on your verified data">
               Looked at: {[...new Set(r.tools_used.map((t) => TOOL_LABELS[t.name] ?? t.name))].join(" · ")}
