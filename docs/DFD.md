@@ -16,7 +16,7 @@ flowchart LR
 ```
 
 Everything runs on one local machine; no data leaves it unless an optional cloud
-LLM (Gemini) is switched on.
+LLM (Groq) is switched on.
 
 ## Level 1 — the four stages and the gate
 
@@ -51,7 +51,7 @@ flowchart LR
     C -->|keep the better reading| O2[OCR text + words]
     O -->|confident| O2
     O2 --> K["optional PaddleOCR<br/>second opinion"]
-    O2 --> E["extraction: Gemini / Ollama /<br/>offline rule parser"]
+    O2 --> E["extraction: Groq / Ollama /<br/>offline rule parser"]
     X --> E
     E --> Q["field confidence =<br/>parser × own-word OCR × agreement"]
     W --> V

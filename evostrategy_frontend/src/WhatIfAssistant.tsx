@@ -164,7 +164,7 @@ export function WhatIfAssistant({ input, onApply }: { input: ScenarioInput; onAp
               ))}
             {busy && <div className="thinking wi-thinking"><span /><span /><span />Working it out</div>}
           </div>
-          {!configured && <p className="wi-note">The assistant isn't configured. Add an API key or start Ollama, then reload.</p>}
+          {!configured && <p className="wi-note">The assistant isn't configured. Add GROQ_API_KEY to .env, then reload.</p>}
           <form className="wi-input" onSubmit={(e) => { e.preventDefault(); void send(draft); }}>
             <input ref={field} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="e.g. hire 2 people and raise prices 5%" disabled={busy || !configured} maxLength={2000} />
             <button type="submit" disabled={busy || !draft.trim() || !configured} aria-label="Send">↑</button>

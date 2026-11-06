@@ -1,11 +1,11 @@
-"""Choose the Stage 1 field extractor: Gemini, local Ollama, or offline rules.
+"""Choose the Stage 1 field extractor: Groq, local Ollama, or offline rules.
 
 Selection is controlled by ``LLM_PROVIDER``:
 
-- ``gemini``  -> Google Gemini (needs ``GEMINI_API_KEY``)
+- ``groq``    -> Groq (needs ``GROQ_API_KEY``)
 - ``ollama``  -> a local Ollama model (``OLLAMA_MODEL``, ``OLLAMA_URL``)
 - ``rules``   -> deterministic offline parser, no network
-- ``auto``    -> (default) Gemini when a key is set, otherwise rules
+- ``auto``    -> (default) Groq when a key is set, Ollama when configured, otherwise rules
 
 If an LLM provider fails, extraction falls back to the rule parser and the
 failure is recorded in the returned method string so it is never silent.
@@ -23,11 +23,11 @@ from .rule_parser import parse_document_rules
 
 def parse_document_ollama(text: str) -> dict[str, Any]:
     """Extract fields with a local Ollama model using the Stage 1 instruction."""
-    from .llm_parser import _INSTRUCTION
-
     model = os.environ.get("OLLAMA_MODEL")
     if not model:
         raise RuntimeError("OLLAMA_MODEL environment variable not set")
+    from .llm_parser import _INSTRUCTION
+
     url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
     payload = json.dumps(
         {
@@ -50,7 +50,11 @@ def parse_document_ollama(text: str) -> dict[str, Any]:
 def _provider() -> str:
     provider = os.environ.get("LLM_PROVIDER", "auto").strip().lower()
     if provider == "auto":
-        return "gemini" if os.environ.get("GEMINI_API_KEY") else "rules"
+        if os.environ.get("GROQ_API_KEY"):
+            return "groq"
+        if os.environ.get("OLLAMA_MODEL"):
+            return "ollama"
+        return "rules"
     return provider
 
 
@@ -83,7 +87,7 @@ def parse_document(
     provider = _provider()
     method = provider
     try:
-        if provider == "gemini":
+        if provider == "groq":
             from .llm_parser import parse_document_llm
 
             data = parse_document_llm(text)

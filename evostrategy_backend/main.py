@@ -33,8 +33,6 @@ from analytics.verified import load_transactions, verified_transactions
 from analytics.whatif import Scenario, simulate
 from analytics.aggregates import monthly_series
 from analytics.finance import data_sources, runway
-import anthropic
-
 from assistant import agent as assistant_agent
 from assistant.tools import WhatIfDesk
 from ingestion.service import SUPPORTED_TYPES
@@ -324,16 +322,14 @@ def _assistant_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=503, detail=f"The assistant is not configured. {exc}")
     if isinstance(exc, ValueError):
         return HTTPException(status_code=422, detail=str(exc))
-    if isinstance(exc, anthropic.AuthenticationError):
-        return HTTPException(status_code=502, detail="Anthropic rejected the API key. Check ANTHROPIC_API_KEY.")
-    if isinstance(exc, anthropic.RateLimitError):
-        return HTTPException(status_code=429, detail="Anthropic rate limit reached. Try again in a moment.")
-    if isinstance(exc, anthropic.APIConnectionError):
-        return HTTPException(status_code=503, detail="Could not reach the Anthropic API.")
-    if isinstance(exc, anthropic.APIStatusError):
-        if "credit balance" in str(exc.message).lower():
-            return HTTPException(status_code=402, detail="Your Anthropic account has no API credit left. Add credit under Plans & Billing in the Anthropic Console, then try again.")
-        return HTTPException(status_code=502, detail=f"Anthropic API error ({exc.status_code}): {exc.message}")
+    if "api key" in str(exc).lower() or "authentication" in str(exc).lower():
+        return HTTPException(status_code=502, detail="Groq rejected the API key. Check GROQ_API_KEY.")
+    if "rate limit" in str(exc).lower() or "resource exhausted" in str(exc).lower():
+        return HTTPException(status_code=429, detail="Groq rate limit reached. Try again in a moment.")
+    if "connection" in str(exc).lower() or "unavailable" in str(exc).lower():
+        return HTTPException(status_code=503, detail="Could not reach the Groq API.")
+    if type(exc).__module__.startswith("groq"):
+        return HTTPException(status_code=502, detail=f"Groq API error: {exc}")
     raise exc
 
 

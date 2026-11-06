@@ -96,8 +96,8 @@ class SemanticLLMProvider(Protocol):
         """Return one supplied candidate, or ``None`` when uncertain."""
 
 
-class GeminiSemanticProvider:
-    """Optional Gemini resolver constrained to mapper-supplied candidates."""
+class GroqSemanticProvider:
+    """Optional Groq resolver constrained to mapper-supplied candidates."""
 
     def resolve(
         self,
@@ -108,13 +108,12 @@ class GeminiSemanticProvider:
         nearby_fields: list[dict[str, Any]],
         candidates: tuple[SemanticRole, ...],
     ) -> SemanticRole | None:
-        """Ask Gemini for one allowed role, returning ``None`` when unavailable."""
-        api_key = os.environ.get("GEMINI_API_KEY")
+        """Ask Groq for one allowed role, returning ``None`` when unavailable."""
+        api_key = os.environ.get("GROQ_API_KEY")
         if not api_key or not candidates:
             return None
 
-        from google import genai
-        from google.genai import types
+        from groq import Groq
 
         prompt = {
             "document_type": document_type.value,
@@ -123,22 +122,25 @@ class GeminiSemanticProvider:
             "nearby_fields": nearby_fields,
             "allowed_roles": [candidate.value for candidate in candidates],
         }
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=json.dumps(prompt, default=str),
-            config=types.GenerateContentConfig(
-                system_instruction=(
-                    "Choose the best semantic role from allowed_roles only. "
-                    "Return JSON exactly as {\"role\": \"ROLE\"} or "
-                    "{\"role\": null} when uncertain. Never invent a role."
-                ),
-                response_mime_type="application/json",
-                temperature=0,
-            ),
+        client = Groq(api_key=api_key)
+        response = client.chat.completions.create(
+            model=os.environ.get("ASSISTANT_MODEL", "llama-3.3-70b-versatile"),
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Choose the best semantic role from allowed_roles only. "
+                        "Return JSON exactly as {\"role\": \"ROLE\"} or "
+                        "{\"role\": null} when uncertain. Never invent a role."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(prompt, default=str)},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0,
         )
         try:
-            selected = json.loads(response.text).get("role")
+            selected = json.loads(response.choices[0].message.content or "{}").get("role")
         except (AttributeError, json.JSONDecodeError):
             return None
         try:
@@ -351,6 +353,11 @@ def _document_type(document: SourceDocument) -> DocumentType:
         if keyword in heading:
             return candidate
     return DocumentType.UNKNOWN
+
+
+def infer_document_type(document: SourceDocument) -> str:
+    """Infer a source document type using explicit fields and extracted evidence."""
+    return _document_type(document).value
 
 
 def _contextualize(candidates: Iterable[SemanticCandidate], document_type: DocumentType) -> list[SemanticCandidate]:

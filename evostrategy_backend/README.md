@@ -37,7 +37,7 @@ your local server uses another address. This local setup is only for
 development. In production, Render runs Ollama as a private service and the
 hosted backend receives its private `OLLAMA_URL`; users do not install or run
 Ollama on their laptops. The Ollama response is required to be JSON and follows
-the same extraction contract as the Gemini parser.
+the same extraction contract as the Groq parser.
 
 ## API flow
 

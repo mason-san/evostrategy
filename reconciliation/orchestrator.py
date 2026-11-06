@@ -27,7 +27,7 @@ from reconciliation.normalization import identifier_match_key
 from reconciliation.normalization import NormalizedDocument, normalize_document
 from reconciliation.semantic_mapping import (
     DocumentType,
-    GeminiSemanticProvider,
+    GroqSemanticProvider,
     SemanticRole,
     map_document,
     normalize_label,
@@ -409,8 +409,11 @@ def reconcile_documents(
 ) -> RunResult:
     """Run the full Stage 2 reconciliation over every stored source document."""
     if use_llm is None:
-        use_llm = bool(os.environ.get("GEMINI_API_KEY"))
-    provider = GeminiSemanticProvider() if use_llm else None
+        use_llm = (
+            os.environ.get("LLM_PROVIDER", "auto").strip().lower() != "rules"
+            and bool(os.environ.get("GROQ_API_KEY"))
+        )
+    provider = GroqSemanticProvider() if use_llm else None
 
     normalized: dict[str, NormalizedDocument] = {}
     facts: dict[str, DocumentFacts] = {}
