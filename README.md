@@ -8,7 +8,7 @@ not add up to a human for review, and only then builds analytics, forecasts, and
 cash-runway projections from the verified numbers.
 
 Everything runs on one machine: a SQLite registry, local file storage, optional
-LLM extraction (Gemini or Ollama), and an offline rule parser when no LLM is
+LLM extraction (Groq or Ollama), and an offline rule parser when no LLM is
 configured. Nothing leaves your computer unless you explicitly enable a cloud
 model.
 
@@ -69,8 +69,8 @@ with 85% intervals, holdout and rolling backtests), cash runway from a stated
 balance, and what-if scenarios (volume, pricing, headcount, vendor
 consolidation) that never modify stored data.
 
-An optional AI assistant (`assistant/`, Claude via Anthropic or a local Ollama
-model) answers questions over read-only tools against the verified data.
+An optional AI assistant (`assistant/`, Groq) answers questions over
+read-only tools against the verified data.
 
 ## Quick start
 
@@ -92,6 +92,65 @@ uvicorn evostrategy_backend.main:app --port 8000
 
 Open http://127.0.0.1:8000, click **Get started**, and either upload documents
 or choose **Use a sample company's invoices, payments and ledger**.
+
+### Local RAG chunks
+
+After ingestion, the first RAG step can be inspected without running OCR again:
+
+```bash
+python scripts/chunk_documents.py
+python scripts/chunk_documents.py --max-chars 600 --overlap-chars 80
+```
+
+The command reads extracted `SourceDocument` payloads from the SQLite registry
+and prints readable JSON chunks with deterministic IDs and source metadata.
+
+To generate local embeddings for those chunks, configure Ollama with the
+`nomic-embed-text` model and run:
+
+```bash
+ollama pull nomic-embed-text
+python scripts/embed_chunks.py
+```
+
+The embedding command uses `/api/embed`, validates 768 dimensions, preserves
+chunk IDs, and prints only a short vector preview.
+
+### PostgreSQL + pgvector storage
+
+Step 3 stores chunks and vectors in the local `rag_chunks` PostgreSQL table.
+Set `RAG_DATABASE_URL` when using a non-default database, then initialize the
+repeatable schema with:
+
+```bash
+docker run --name evo-pgvector \
+  -e POSTGRES_DB=evostrategy -e POSTGRES_USER=evo -e POSTGRES_PASSWORD=evo_local_dev \
+  -p 5433:5432 -d pgvector/pgvector:pg17
+.venv/bin/python -c "from rag.storage import init_schema; init_schema()"
+```
+
+The schema includes a document lookup index and an HNSW cosine-distance index
+on the 768-dimensional embedding column. Retrieval is intentionally not part
+of this step.
+
+Run ingestion explicitly after the schema is initialized:
+
+```bash
+.venv/bin/python -m rag.ingestion
+.venv/bin/python -m rag.ingestion --document-id invoice_001_page_1
+.venv/bin/python -m rag.retrieval "Which invoice has the highest total?"
+.venv/bin/python -m rag.generation "Which invoice has the highest total?"
+```
+
+The command reads only documents already in the SQLite registry, then reports
+inserted, updated, unchanged, failed, and stale-deleted chunks. It does not
+run OCR or start automatically with the backend.
+
+Generation uses the local `qwen3.5:9b` Ollama model over retrieved context:
+
+```bash
+.venv/bin/python -m rag.generation
+```
 
 For UI development with hot reload, run `npm run dev` in
 `evostrategy_frontend/` (http://localhost:5173) alongside the API.
@@ -167,6 +226,9 @@ python pipeline.py run path/to/folder file.pdf  # ingest + reconcile
 python pipeline.py reconcile                    # re-run Stage 2 over stored documents
 python pipeline.py status                       # last run summary
 python pipeline.py reset                        # fresh registry (old one moved to backups/)
+python scripts/chunk_documents.py              # render registered extractions as RAG chunks
+python scripts/embed_chunks.py                 # embed registered chunks with Ollama
+python -m rag.ingestion                        # ingest chunks + embeddings into PostgreSQL
 
 python scripts/evaluate_all.py [--degraded]     # all four hypotheses -> docs/EVALUATION.md
 python scripts/evaluate_extraction.py [--degraded]   # H1 OCR accuracy (clean / poor scans)
@@ -179,11 +241,10 @@ pytest                                          # tests run isolated in a temp d
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LLM_PROVIDER` | `auto` | `gemini`, `ollama`, `rules`, or `auto` (Gemini if a key is set, else rules) |
-| `GEMINI_API_KEY` | — | Enables Gemini extraction and semantic-mapping fallback |
-| `ANTHROPIC_API_KEY` | — | Enables the Home-screen assistant (Claude + read-only tools over verified data); put it in `.env` |
-| `ASSISTANT_MODEL` | `claude-opus-5-5` | Default assistant model (also selectable in the UI) |
-| `OLLAMA_MODEL` / `OLLAMA_URL` | — / `http://127.0.0.1:11434` | Local LLM extraction / assistant |
+| `LLM_PROVIDER` | `auto` | `groq`, `ollama`, `rules`, or `auto` (Groq if a key is set, otherwise Ollama if `OLLAMA_MODEL` is set) |
+| `GROQ_API_KEY` | — | Enables Groq extraction, semantic-mapping fallback, and the assistant |
+| `ASSISTANT_MODEL` | `llama-3.3-70b-versatile` | Default Groq assistant model (also selectable in the UI) |
+| `OLLAMA_MODEL` / `OLLAMA_URL` | — / `http://127.0.0.1:11434` | Local Ollama model and server; set `LLM_PROVIDER=ollama` to use it |
 | `OCR_PREPROCESS` | `auto` | OpenCV clean-up: `auto` (only pages that read poorly), `always`, `off` |
 | `OCR_SECOND_ENGINE` | — | `paddle` to add PaddleOCR agreement checks (`pip install paddleocr paddlepaddle`) |
 | `EVOSTRATEGY_DATA_DIR` | `data/processed` | Where the registry, page images, uploads and backups live |
@@ -202,7 +263,7 @@ the registry.
 - `service.py` — `ingest_file(path)` for every supported type. PDFs are rendered
   at 300 DPI and OCR'd with Tesseract, returning per-word confidence. Pages that
   read poorly are re-read after OpenCV clean-up and the better reading is kept.
-- `extraction/llm_parser.py` (Gemini), `dispatcher.py` (Ollama + fallback),
+- `extraction/llm_parser.py` (Groq), `dispatcher.py` (Ollama + fallback),
   `rule_parser.py` (offline; reads known labels whose colon OCR lost). Labels and
   values are kept exactly as printed.
 - Field confidence = parser confidence × the OCR confidence of that field's own

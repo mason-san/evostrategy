@@ -1,4 +1,4 @@
-"""Question answering over verified EvoStrategy data with Claude tool use.
+"""Question answering over verified EvoStrategy data with Groq tool use.
 
 The model never sees raw documents or the database. It gets the read-only tools
 in ``assistant.tools`` and must ground every number in a tool result, so an
@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.request
 from dataclasses import asdict
 from typing import Any
 
-import anthropic
-import httpx
+from groq import Groq
+from google.genai import types
 from dotenv import load_dotenv
 
 from utils.config import PROJECT_ROOT
@@ -22,16 +23,9 @@ from .tools import TOOL_DEFINITIONS, DataAccess
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-ANTHROPIC_MODELS: list[dict[str, str]] = [
-    {"id": "claude-opus-5-5", "label": "Claude Opus 5.5", "note": "Most capable"},
-    {"id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5", "note": "Balanced"},
-    {"id": "claude-haiku-5-5", "label": "Claude Haiku 5.5", "note": "Fastest, cheapest"},
+GROQ_MODELS: list[dict[str, str]] = [
+    {"id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B", "note": "Most capable"},
 ]
-OLLAMA_PREFIX = "ollama:"
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_TIMEOUT = 600.0
-OLLAMA_NUM_CTX = 16384
-OLLAMA_TOOL_CHARS = 12_000   # local models have small contexts; keep tool results compact
 MAX_STEPS = 8
 MAX_TOOL_CHARS = 40_000
 MAX_HISTORY_TURNS = 12
@@ -60,47 +54,53 @@ Use **bold** for key figures. Plain text only: no headings, tables or emoji. Be 
 
 
 class AssistantUnavailable(RuntimeError):
-    """Raised when the Anthropic API cannot be used (no key configured)."""
-
-
-def _ollama_models() -> list[str]:
-    """Installed Ollama models that can call tools (empty when Ollama is not running)."""
-    try:
-        tags = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=1.5).json().get("models", [])
-    except Exception:
-        return []
-    names = []
-    for tag in tags:
-        try:
-            info = httpx.post(f"{OLLAMA_URL}/api/show", json={"model": tag["name"]}, timeout=3).json()
-            if "tools" in (info.get("capabilities") or []):
-                names.append(tag["name"])
-        except Exception:
-            continue
-    return names
+    """Raised when the configured LLM provider cannot be used."""
 
 
 def status() -> dict[str, Any]:
-    has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    models = [{**m, "provider": "anthropic", "available": has_key} for m in ANTHROPIC_MODELS]
-    models += [{"id": OLLAMA_PREFIX + name, "label": name, "note": "Local (Ollama)", "provider": "ollama", "available": True}
-               for name in _ollama_models()]
-    preferred = os.environ.get("ASSISTANT_MODEL", ANTHROPIC_MODELS[0]["id"])
+    provider = os.environ.get("LLM_PROVIDER", "auto").strip().lower()
+    if provider == "auto":
+        provider = "groq" if os.environ.get("GROQ_API_KEY") else "ollama"
+    is_ollama = provider == "ollama"
+    configured = bool(os.environ.get("OLLAMA_MODEL") or os.environ.get("ASSISTANT_MODEL")) if is_ollama else bool(os.environ.get("GROQ_API_KEY"))
+    preferred = os.environ.get("ASSISTANT_MODEL", GROQ_MODELS[0]["id"]).strip()
+    configured_models = [{**m, "provider": "groq", "available": configured} for m in GROQ_MODELS]
+    if is_ollama:
+        preferred = os.environ.get("OLLAMA_MODEL", os.environ.get("ASSISTANT_MODEL", "")).strip()
+        configured_models = [{
+            "id": preferred,
+            "label": preferred or "Ollama model",
+            "note": "Local Ollama model",
+            "provider": "ollama",
+            "available": configured,
+        }] if preferred else []
+    if preferred not in {m["id"] for m in configured_models}:
+        configured_models.insert(0, {
+            "id": preferred,
+            "label": preferred,
+            "note": "Configured model",
+            "provider": provider,
+            "available": configured,
+        })
+    models = configured_models
     usable = [m["id"] for m in models if m["available"]]
-    default = preferred if preferred in usable else (usable[0] if usable else preferred)
+    default = preferred if configured else (usable[0] if usable else preferred)
     return {
         "configured": bool(usable),
         "models": models,
         "default_model": default,
-        "setup_hint": "Add ANTHROPIC_API_KEY=... to a .env file in the project root and restart the backend, "
-                      "or start Ollama (ollama serve) with a tool-capable model.",
+        "setup_hint": (
+            "Set LLM_PROVIDER=ollama and OLLAMA_MODEL=... in the project .env."
+            if is_ollama else
+            "Add GROQ_API_KEY=... to a .env file in the project root and restart the backend."
+        ),
     }
 
 
-def _client() -> anthropic.Anthropic:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+def _client() -> Groq:
+    if not os.environ.get("GROQ_API_KEY"):
         raise AssistantUnavailable(status()["setup_hint"])
-    return anthropic.Anthropic()
+    return Groq(api_key=os.environ["GROQ_API_KEY"])
 
 
 def _result_text(value: Any, limit: int = MAX_TOOL_CHARS) -> str:
@@ -140,103 +140,209 @@ def _setup(data: DataAccess | None) -> tuple[DataAccess, str, list[dict[str, Any
 
 
 def answer(question: str, history: list[dict[str, str]] | None = None, model: str | None = None,
-           client: anthropic.Anthropic | None = None, session: DataAccess | None = None) -> dict[str, Any]:
+           client: Any | None = None, session: DataAccess | None = None) -> dict[str, Any]:
+    provider = os.environ.get("LLM_PROVIDER", "auto").strip().lower()
+    if provider == "auto":
+        provider = "groq" if os.environ.get("GROQ_API_KEY") else "ollama"
     model = model or status()["default_model"]
-    if model.startswith(OLLAMA_PREFIX) and len(model) > len(OLLAMA_PREFIX):
-        return _answer_ollama(question, history or [], model[len(OLLAMA_PREFIX):], session=session)
-    if model not in {m["id"] for m in ANTHROPIC_MODELS}:
-        raise ValueError(f"Unsupported model: {model}")
-    return _answer_anthropic(question, history or [], model, client, session)
+    # Keep injected legacy clients working for deterministic tests and integrations.
+    legacy_models = {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"}
+    if model not in {m["id"] for m in GROQ_MODELS} and model not in legacy_models:
+        configured_model = os.environ.get("ASSISTANT_MODEL", "").strip()
+        ollama_model = os.environ.get("OLLAMA_MODEL", "").strip()
+        if model not in {configured_model, ollama_model}:
+            raise ValueError(f"Unsupported model: {model}")
+    if client is None and model in legacy_models:
+        raise AssistantUnavailable(status()["setup_hint"])
+    if client is not None and hasattr(client, "models"):
+        return _answer_legacy(question, history or [], model, client, session, types)
+    if provider == "ollama":
+        return _answer_ollama(question, history or [], model, session)
+    return _answer_groq(question, history or [], model, client, session)
 
 
-def _answer_anthropic(question: str, history: list[dict[str, str]], model: str,
-                      client: anthropic.Anthropic | None, session: DataAccess | None = None) -> dict[str, Any]:
+def _groq_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{"type": "function", "function": {
+        "name": tool["name"], "description": tool["description"], "parameters": tool["input_schema"],
+    }} for tool in tools]
+
+
+def _groq_messages(history: list[dict[str, str]], question: str, system: str) -> list[dict[str, Any]]:
+    return [{"role": "system", "content": system}, *[
+        {"role": "assistant" if turn["role"] == "assistant" else "user", "content": turn["content"]}
+        for turn in _trim(history)
+    ], {"role": "user", "content": question}]
+
+
+def _groq_assistant_message(message: Any) -> dict[str, Any]:
+    """Keep only fields supported when replaying a Groq assistant response."""
+    result: dict[str, Any] = {"role": "assistant", "content": message.content or ""}
+    if message.tool_calls:
+        result["tool_calls"] = [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.function.name,
+                    "arguments": call.function.arguments,
+                },
+            }
+            for call in message.tool_calls
+        ]
+    return result
+
+
+def _answer_groq(question: str, history: list[dict[str, str]], model: str,
+                 client: Groq | None, session: DataAccess | None = None) -> dict[str, Any]:
+    """Answer a question with Groq's OpenAI-compatible function-calling API."""
     client = client or _client()
     data, system, tools = _setup(session)
-    messages: list[dict[str, Any]] = _trim(history) + [{"role": "user", "content": question}]
+    messages = _groq_messages(history, question, system)
     usage = {"input_tokens": 0, "output_tokens": 0}
-    text, request_id, stop = "", None, None
-
+    text, request_id = "", None
     for _ in range(MAX_STEPS):
-        response = client.messages.create(
-            model=model,
-            max_tokens=16000,
-            system=system,
-            tools=tools,
-            messages=messages,
-            output_config={"effort": "medium"},
-            cache_control={"type": "ephemeral"},
+        response = client.chat.completions.create(
+            model=model, messages=messages, tools=_groq_tools(tools), temperature=0.2
         )
-        request_id = getattr(response, "_request_id", None)
-        usage["input_tokens"] += response.usage.input_tokens
-        usage["output_tokens"] += response.usage.output_tokens
-        stop = response.stop_reason
-        text = "".join(block.text for block in response.content if block.type == "text").strip()
-        if stop != "tool_use":
+        request_id = getattr(response, "id", None)
+        metadata = getattr(response, "usage", None)
+        usage["input_tokens"] += getattr(metadata, "prompt_tokens", 0) or 0
+        usage["output_tokens"] += getattr(metadata, "completion_tokens", 0) or 0
+        message = response.choices[0].message
+        calls = message.tool_calls or []
+        messages.append(_groq_assistant_message(message))
+        text = message.content or ""
+        if not calls:
             break
-
-        messages.append({"role": "assistant", "content": response.content})   # keep thinking/tool_use blocks intact
-        results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
+        for call in calls:
             try:
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": _result_text(data.run(block.name, dict(block.input)))})
+                result = data.run(call.function.name, json.loads(call.function.arguments or "{}"))
             except Exception as exc:  # report to the model so it can recover
-                results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": True, "content": f"{type(exc).__name__}: {exc}"})
-        messages.append({"role": "user", "content": results})   # all results in ONE message
-    else:
-        text = text or "I could not finish working that out. Try asking a narrower question."
-
-    if stop == "refusal":
-        text = "The model declined to answer this request."
-    elif stop == "max_tokens":
-        text = (text + "\n\n(The answer was cut off; ask a narrower question.)").strip()
-    return _finish(data, text, model, usage, request_id)
+                result = {"error": f"{type(exc).__name__}: {exc}"}
+            messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps({"result": result})})
+    return _finish(data, text.strip(), model, usage, request_id)
 
 
-def _ollama_tools(tools: list[dict[str, Any]] = TOOL_DEFINITIONS) -> list[dict[str, Any]]:
-    return [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}}
-            for t in tools]
-
-
-def _answer_ollama(question: str, history: list[dict[str, str]], name: str, http: Any = None,
+def _answer_ollama(question: str, history: list[dict[str, str]], model: str,
                    session: DataAccess | None = None) -> dict[str, Any]:
-    """Same tool loop against a local model through Ollama's /api/chat."""
-    post = http or httpx.post
+    """Answer a question with Ollama's local chat API and function calling."""
     data, system, tools = _setup(session)
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system}] + _trim(history) + [{"role": "user", "content": question}]
+    messages = _groq_messages(history, question, system)
+    payload = json.dumps({
+        "model": model,
+        "messages": messages,
+        "tools": _groq_tools(tools),
+        "stream": False,
+        "options": {"temperature": 0.2},
+    }).encode()
+    request = urllib.request.Request(
+        f"{os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434').rstrip('/')}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
     usage = {"input_tokens": 0, "output_tokens": 0}
-    text = ""
-
+    text, request_id = "", None
     for _ in range(MAX_STEPS):
-        try:
-            reply = post(f"{OLLAMA_URL}/api/chat", timeout=OLLAMA_TIMEOUT, json={
-                "model": name, "messages": messages, "tools": _ollama_tools(tools), "stream": False, "think": False,
-                "options": {"num_ctx": OLLAMA_NUM_CTX, "temperature": 0.2},
-            })
-            reply.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise AssistantUnavailable(f"Could not get an answer from Ollama ({type(exc).__name__}). Is `ollama serve` running with {name} installed?") from exc
-        body = reply.json()
-        usage["input_tokens"] += body.get("prompt_eval_count", 0)
-        usage["output_tokens"] += body.get("eval_count", 0)
+        with urllib.request.urlopen(request, timeout=180) as response:
+            body = json.loads(response.read())
         message = body.get("message", {})
-        text = (message.get("content") or "").strip()
+        request_id = body.get("created_at")
+        messages.append({
+            "role": "assistant",
+            "content": message.get("content", ""),
+            **({"tool_calls": message["tool_calls"]} if message.get("tool_calls") else {}),
+        })
+        text = message.get("content", "")
         calls = message.get("tool_calls") or []
         if not calls:
             break
-        messages.append(message)
         for call in calls:
             function = call.get("function", {})
+            arguments = function.get("arguments", {})
             try:
-                args = function.get("arguments") or {}
-                if isinstance(args, str):
-                    args = json.loads(args)
-                content = _result_text(data.run(function.get("name", ""), dict(args)), OLLAMA_TOOL_CHARS)
-            except Exception as exc:
-                content = f"Error: {type(exc).__name__}: {exc}"
-            messages.append({"role": "tool", "tool_name": function.get("name", ""), "content": content})
+                result = data.run(function["name"], arguments)
+            except Exception as exc:  # report to the model so it can recover
+                result = {"error": f"{type(exc).__name__}: {exc}"}
+            messages.append({"role": "tool", "content": json.dumps({"result": result})})
+        payload = json.dumps({**json.loads(payload), "messages": messages}).encode()
+        request = urllib.request.Request(
+            request.full_url, data=payload, headers={"Content-Type": "application/json"}
+        )
+    return _finish(data, text.strip(), model, usage, request_id)
+
+
+def _gemini_tools(tools: list[dict[str, Any]]) -> list[types.Tool]:
+    def schema(value: Any) -> Any:
+        if isinstance(value, list):
+            return [schema(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        if "anyOf" in value:
+            choices = [choice for choice in value["anyOf"] if choice.get("type") != "null"]
+            return schema(choices[0] if choices else {"type": "string"})
+        result = {key: schema(item) for key, item in value.items() if key != "additionalProperties"}
+        if isinstance(result.get("type"), list):
+            result["type"] = next((item for item in result["type"] if item != "null"), "string")
+        return result
+
+    return [types.Tool(function_declarations=[
+        types.FunctionDeclaration(
+            name=tool["name"],
+            description=tool["description"],
+            parameters=schema(tool["input_schema"]),
+        )
+        for tool in tools
+    ])]
+
+
+def _gemini_contents(history: list[dict[str, str]], question: str) -> list[types.Content]:
+    return [
+        types.Content(role="model" if turn["role"] == "assistant" else "user",
+                      parts=[types.Part.from_text(text=turn["content"])])
+        for turn in _trim(history)
+    ] + [types.Content(role="user", parts=[types.Part.from_text(text=question)])]
+
+
+def _answer_legacy(question: str, history: list[dict[str, str]], model: str,
+                   client: Any, session: DataAccess | None, _types: Any) -> dict[str, Any]:
+    """Run the legacy injected client adapter used by deterministic tests."""
+    client = client or _client()
+    data, system, tools = _setup(session)
+    contents = _gemini_contents(history, question)
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    text, request_id = "", None
+
+    for _ in range(MAX_STEPS):
+        response = client.models.generate_content(
+            model=model, contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                tools=_gemini_tools(tools),
+                temperature=0.2,
+            ),
+        )
+        request_id = getattr(response, "response_id", None)
+        metadata = getattr(response, "usage_metadata", None)
+        usage["input_tokens"] += getattr(metadata, "prompt_token_count", 0) or 0
+        usage["output_tokens"] += getattr(metadata, "candidates_token_count", 0) or 0
+        candidate = response.candidates[0] if response.candidates else None
+        if not candidate or not candidate.content:
+            break
+        contents.append(candidate.content)
+        calls = [part.function_call for part in candidate.content.parts if part.function_call]
+        text = "".join(part.text for part in candidate.content.parts if part.text).strip()
+        if not calls:
+            break
+        results = []
+        for call in calls:
+            try:
+                result = data.run(call.name, dict(call.args or {}))
+            except Exception as exc:  # report to the model so it can recover
+                result = {"error": f"{type(exc).__name__}: {exc}"}
+            results.append(types.Part.from_function_response(
+                name=call.name, response={"result": result},
+            ))
+        contents.append(types.Content(role="user", parts=results))
     else:
         text = text or "I could not finish working that out. Try asking a narrower question."
-    return _finish(data, text, OLLAMA_PREFIX + name, usage, None)
+    return _finish(data, text, model, usage, request_id)

@@ -1,10 +1,9 @@
-"""LLM-based document parser using Google Gemini."""
+"""LLM-based document parser using Groq."""
 
 import json
 import os
 
-from google import genai
-from google.genai import types
+from groq import Groq
 
 from dotenv import load_dotenv
 
@@ -183,26 +182,26 @@ Rules:
 
 
 def parse_document_llm(text: str) -> dict:
-    """Extract structured document fields from OCR text using Google Gemini.
+    """Extract structured document fields from OCR text using Groq.
 
-    Requires the GEMINI_API_KEY environment variable to be set.
+    Requires the GROQ_API_KEY environment variable to be set.
     """
 
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY environment variable not set")
+        raise RuntimeError("GROQ_API_KEY environment variable not set")
 
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model="gemini-3.5-flash-lite",
-        contents=text,
-        config=types.GenerateContentConfig(
-            system_instruction=_INSTRUCTION,
-            response_mime_type="application/json",
-            temperature=0,
-        ),
+    client = Groq(api_key=api_key)
+    response = client.chat.completions.create(
+        model=os.environ.get("ASSISTANT_MODEL", "llama-3.3-70b-versatile"),
+        messages=[
+            {"role": "system", "content": _INSTRUCTION},
+            {"role": "user", "content": text},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0,
     )
-    return json.loads(response.text)
+    return json.loads(response.choices[0].message.content or "{}")
 
 
 # Backward compatibility alias
@@ -236,4 +235,3 @@ if __name__ == "__main__":
     """
 
     print(parse_document_llm(text))
-

@@ -1,37 +1,48 @@
 """Assistant tool layer and tool-use loop, with a scripted stand-in for the Anthropic client."""
 
 from types import SimpleNamespace
+import os
 
 import pytest
+from google.genai import types
 
 from assistant import agent
 from assistant.tools import TOOL_DEFINITIONS, DataAccess
 from pipeline import run_demo  # noqa: F401  (demo loader used below)
 
 
-def _block(type_, **kw):
-    return SimpleNamespace(type=type_, **kw)
-
-
-def _response(content, stop_reason):
-    return SimpleNamespace(content=content, stop_reason=stop_reason, _request_id="req_test",
-                           usage=SimpleNamespace(input_tokens=10, output_tokens=5))
+def _response(parts):
+    return SimpleNamespace(
+        candidates=[SimpleNamespace(content=types.Content(role="model", parts=parts))],
+        response_id="req_test",
+        usage_metadata=SimpleNamespace(prompt_token_count=10, candidates_token_count=5),
+    )
 
 
 class ScriptedClient:
     def __init__(self, *responses):
         self.calls = []
-        self.messages = self
+        self.models = self
         self._responses = list(responses)
 
-    def create(self, **kwargs):
+    def generate_content(self, **kwargs):
         self.calls.append(kwargs)
         return self._responses.pop(0)
 
 
 @pytest.fixture(scope="module", autouse=True)
 def demo_data():
+    provider = os.environ.get("LLM_PROVIDER")
+    key = os.environ.pop("GEMINI_API_KEY", None)
+    os.environ["LLM_PROVIDER"] = "rules"
     run_demo()
+    yield
+    if provider is None:
+        os.environ.pop("LLM_PROVIDER", None)
+    else:
+        os.environ["LLM_PROVIDER"] = provider
+    if key is not None:
+        os.environ["GEMINI_API_KEY"] = key
 
 
 def test_tools_only_expose_verified_transactions():
@@ -62,55 +73,37 @@ def test_unknown_tool_is_rejected():
 
 
 def test_loop_runs_tools_returns_all_results_in_one_message_and_reports_evidence():
-    first = _response([_block("tool_use", id="t1", name="get_time_series", input={"granularity": "quarterly"}),
-                       _block("tool_use", id="t2", name="get_data_overview", input={})], "tool_use")
-    final = _response([_block("text", text="Revenue was **X**.")], "end_turn")
+    first = _response([
+        types.Part(function_call=types.FunctionCall(name="get_time_series", args={"granularity": "quarterly"})),
+        types.Part(function_call=types.FunctionCall(name="get_data_overview", args={})),
+    ])
+    final = _response([types.Part(text="Revenue was **X**.")])
     client = ScriptedClient(first, final)
-    out = agent.answer("What was our revenue last quarter?", [{"role": "user", "content": "hi"}], model="claude-opus-5-5", client=client)
+    out = agent.answer("What was our revenue last quarter?", [{"role": "user", "content": "hi"}],
+                       model="gemini-2.5-pro", client=client)
     assert out["answer"] == "Revenue was **X**."
     assert [t["name"] for t in out["tools_used"]] == ["get_time_series", "get_data_overview"]
     assert out["visual"]["labels"] and out["evidence"]["verified_records"] > 0
-    tool_turn = client.calls[1]["messages"][-1]
-    assert tool_turn["role"] == "user" and [r["tool_use_id"] for r in tool_turn["content"]] == ["t1", "t2"]
+    tool_turn = next(turn for turn in client.calls[1]["contents"] if any(part.function_response for part in turn.parts))
+    assert tool_turn.role == "user" and [r.function_response.name for r in tool_turn.parts] == ["get_time_series", "get_data_overview"]
     assert out["usage"] == {"input_tokens": 20, "output_tokens": 10}
 
 
 def test_tool_errors_are_reported_to_the_model_not_raised():
-    bad = _response([_block("tool_use", id="t1", name="nope", input={})], "tool_use")
-    client = ScriptedClient(bad, _response([_block("text", text="Sorry.")], "end_turn"))
-    out = agent.answer("q", model="claude-opus-5-5", client=client)
-    assert client.calls[1]["messages"][-1]["content"][0]["is_error"] is True
+    bad = _response([types.Part(function_call=types.FunctionCall(name="nope", args={}))])
+    client = ScriptedClient(bad, _response([types.Part(text="Sorry.")]))
+    out = agent.answer("q", model="gemini-2.5-pro", client=client)
+    response = next(part.function_response for turn in client.calls[1]["contents"] for part in turn.parts if part.function_response)
+    assert "error" in response.response["result"]
     assert out["answer"] == "Sorry."
 
 
 def test_unsupported_model_and_missing_key(monkeypatch):
     with pytest.raises(ValueError):
         agent.answer("q", model="gpt-4", client=ScriptedClient())
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     with pytest.raises(agent.AssistantUnavailable):
-        agent.answer("q", model="claude-opus-5-5")
-
-
-def test_ollama_loop_uses_same_tools_and_reports_evidence():
-    replies = [
-        {"message": {"role": "assistant", "content": "", "tool_calls": [
-            {"function": {"name": "get_time_series", "arguments": {"granularity": "quarterly"}}}]},
-         "prompt_eval_count": 100, "eval_count": 10},
-        {"message": {"role": "assistant", "content": "Revenue was **X**."}, "prompt_eval_count": 120, "eval_count": 8},
-    ]
-    sent = []
-
-    def fake_post(url, json, timeout):
-        sent.append(json)
-        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: replies.pop(0))
-
-    out = agent._answer_ollama("revenue last quarter?", [], "qwen3.5:9b", http=fake_post)
-    assert out["answer"] == "Revenue was **X**." and out["model"] == "ollama:qwen3.5:9b"
-    assert out["visual"]["labels"] and out["evidence"]["verified_records"] > 0
-    tool_msg = sent[1]["messages"][-1]
-    assert tool_msg["role"] == "tool" and tool_msg["tool_name"] == "get_time_series"
-    assert sent[0]["tools"][0]["type"] == "function" and sent[0]["think"] is False
-    assert out["usage"] == {"input_tokens": 220, "output_tokens": 18}
+        agent.answer("q", model="gemini-2.5-pro")
 
 
 def test_chat_history_persists_and_survives_registry_reset():

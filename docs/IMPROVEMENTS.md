@@ -81,10 +81,10 @@ score pairs inside the same group. Keep the reference-free ledger pass as it is.
 
 ### 8. Extraction is measured on one invoice layout
 
-Without `GEMINI_API_KEY`, everything runs on the offline rule parser and lexical
+Without `GROQ_API_KEY`, everything runs on the offline rule parser and lexical
 mapper. Extraction accuracy (H1) was measured on a single invoice template, and the
 rule parser does not read line-item tables.
 
 **Fix:** add invoices from at least two or three other layouts to
 `evaluation_dataset/` with ground truth, re-run `scripts/evaluate_all.py`, and report
-rules and Gemini results separately.
+rules and Groq results separately.
